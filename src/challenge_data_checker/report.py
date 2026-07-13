@@ -3,6 +3,10 @@
 import json
 from pathlib import Path
 
+from rich import box
+from rich.console import Console
+from rich.table import Table
+
 from challenge_data_checker.checks import (
     identifier_leakage,
     identifier_namespace_issues,
@@ -262,17 +266,249 @@ def _build_summary_lines(report: dict) -> list[str]:
     return lines
 
 
+def _count_style(count: int) -> str:
+    """Pick a rich style for a finding count, green if zero and red otherwise.
+
+    Args:
+        count: The finding count to style.
+
+    Returns:
+        ``"bold green"`` if ``count`` is zero, ``"bold red"`` otherwise.
+    """
+    return "bold green" if count == 0 else "bold red"
+
+
+def _status_cell(count: int) -> str:
+    """Render a count as a colored PASS/FAIL check-mark cell for a rich table.
+
+    Args:
+        count: The finding count to render.
+
+    Returns:
+        A rich markup string: a green checkmark for zero, a red cross with
+        the count otherwise.
+    """
+    if count == 0:
+        return "[bold green]✓ 0[/]"
+    return f"[bold red]✗ {count}[/]"
+
+
+def _new_table(columns: list[str]) -> Table:
+    """Create a bare rich table with the given column headers.
+
+    The table has no title of its own; callers print a section heading
+    separately so it isn't constrained (and wrapped) by the table's
+    auto-sized column widths.
+
+    Args:
+        columns: Column header labels, in order.
+
+    Returns:
+        An empty rich Table ready to have rows added.
+    """
+    table = Table(
+        box=box.SIMPLE_HEAD,
+        show_header=True,
+        header_style="bold magenta",
+        pad_edge=False,
+    )
+    for i, column in enumerate(columns):
+        table.add_column(column, justify="right" if i > 0 else "left")
+    return table
+
+
+def _print_section(console: Console, title: str, table: Table | None) -> None:
+    """Print a bold section heading followed by its table (or a placeholder).
+
+    Args:
+        console: The rich console to print to.
+        title: The section heading text.
+        table: The table to print, or ``None`` to print a "(none)"
+            placeholder instead (e.g. no identifier columns configured).
+    """
+    console.print(f"[bold cyan]{title}[/]")
+    if table is not None:
+        console.print(table)
+    else:
+        console.print("  (no identifier columns configured/available)")
+    console.print()
+
+
+def _leakage_table(s: dict) -> Table:
+    """Build the train-test leakage summary table.
+
+    Args:
+        s: The report's ``"summary"`` dict.
+
+    Returns:
+        A rich table with one row per leakage check.
+    """
+    table = _new_table(["Check", "Result"])
+    table.add_row(
+        "Exact match - train molecules leaked",
+        _status_cell(s["total_exact_leaked_train_molecules"]),
+    )
+    table.add_row(
+        "Exact match - test molecules leaked",
+        _status_cell(s["total_exact_leaked_test_molecules"]),
+    )
+    table.add_row(
+        "Identifier overlap events", _status_cell(s["total_identifier_leakage_events"])
+    )
+    table.add_row(
+        "Tanimoto similarity flags (>= threshold)",
+        _status_cell(s["total_tanimoto_leakage_pairs"]),
+    )
+    return table
+
+
+def _duplicates_table(s: dict) -> Table:
+    """Build the internal (within-split) duplicates summary table.
+
+    Args:
+        s: The report's ``"summary"`` dict.
+
+    Returns:
+        A rich table with one row per representation/identifier column,
+        showing train and test counts side by side.
+    """
+    table = _new_table(["Representation", "Train", "Test"])
+    for representation in ("raw_smiles", "canonical_smiles", "inchikey"):
+        table.add_row(
+            representation,
+            _status_cell(s["total_internal_duplicates_train"][representation]),
+            _status_cell(s["total_internal_duplicates_test"][representation]),
+        )
+    for col in s["total_internal_duplicates_train_identifiers"]:
+        table.add_row(
+            f"identifier[{col}]",
+            _status_cell(s["total_internal_duplicates_train_identifiers"][col]),
+            _status_cell(s["total_internal_duplicates_test_identifiers"].get(col, 0)),
+        )
+    return table
+
+
+def _namespace_table(s: dict) -> Table | None:
+    """Build the identifier namespace consistency summary table.
+
+    Args:
+        s: The report's ``"summary"`` dict.
+
+    Returns:
+        A rich table with one row per identifier column, or ``None`` if no
+        identifier columns were configured/available.
+    """
+    if not s["total_identifier_namespace_issues"]:
+        return None
+    table = _new_table(["Identifier column", "1 id -> many structures", "1 structure -> many ids"])
+    for col, counts in s["total_identifier_namespace_issues"].items():
+        table.add_row(
+            col,
+            _status_cell(counts["one_id_multiple_structures"]),
+            _status_cell(counts["one_structure_multiple_ids"]),
+        )
+    return table
+
+
+def _quality_table(s: dict) -> Table:
+    """Build the quality-filter flags summary table.
+
+    Args:
+        s: The report's ``"summary"`` dict.
+
+    Returns:
+        A rich table with one row per quality-filter category, showing train
+        and test counts side by side.
+    """
+    table = _new_table(["Filter", "Train", "Test"])
+    table.add_row(
+        "Mixtures/disconnected",
+        _status_cell(s["total_mixtures"]["train"]),
+        _status_cell(s["total_mixtures"]["test"]),
+    )
+    table.add_row(
+        "Salts/metal complexes",
+        _status_cell(s["total_salts_or_metal_complexes"]["train"]),
+        _status_cell(s["total_salts_or_metal_complexes"]["test"]),
+    )
+    table.add_row(
+        "Suspicious fragments",
+        _status_cell(s["total_suspicious_fragments"]["train"]),
+        _status_cell(s["total_suspicious_fragments"]["test"]),
+    )
+    return table
+
+
+def _total_issue_count(s: dict) -> int:
+    """Sum every finding count in the summary into a single overall issue count.
+
+    Args:
+        s: The report's ``"summary"`` dict.
+
+    Returns:
+        The total number of flagged findings across every check.
+    """
+    return (
+        s["total_unparseable"]
+        + s["total_exact_leaked_train_molecules"]
+        + s["total_exact_leaked_test_molecules"]
+        + s["total_identifier_leakage_events"]
+        + s["total_tanimoto_leakage_pairs"]
+        + sum(s["total_internal_duplicates_train"].values())
+        + sum(s["total_internal_duplicates_test"].values())
+        + sum(s["total_internal_duplicates_train_identifiers"].values())
+        + sum(s["total_internal_duplicates_test_identifiers"].values())
+        + sum(
+            count
+            for counts in s["total_identifier_namespace_issues"].values()
+            for count in counts.values()
+        )
+        + sum(s["total_mixtures"].values())
+        + sum(s["total_salts_or_metal_complexes"].values())
+        + sum(s["total_suspicious_fragments"].values())
+    )
+
+
 def print_summary(report: dict, report_output: str | Path) -> None:
     """Print the stdout summary dashboard for a completed audit report.
+
+    Renders row counts, unparseable SMILES, and one colored table per check
+    category (green checkmarks for clean results, red crosses with counts
+    for flagged findings), followed by an overall PASS/FAIL banner.
 
     Args:
         report: The report dict, as returned by ``build_report``.
         report_output: Path the full report was written to, shown in the
             final line of the dashboard.
     """
-    for line in _build_summary_lines(report):
-        print(line)
-    print(f"Full detailed report written to: {report_output}")
+    console = Console(highlight=False)
+    s = report["summary"]
+
+    console.rule("[bold cyan]challenge-data-checker audit summary[/]", style="cyan")
+    console.print(
+        f"  Rows processed     : [bold]train[/]={s['total_train_rows']}  "
+        f"[bold]test[/]={s['total_test_rows']}"
+    )
+    console.print(
+        f"  Unparseable SMILES : "
+        f"[{_count_style(s['total_unparseable'])}]{s['total_unparseable']}[/] "
+        f"(train={s['total_unparseable_train']}, test={s['total_unparseable_test']})"
+    )
+    console.print()
+
+    _print_section(console, "Train-test leakage", _leakage_table(s))
+    _print_section(console, "Internal duplicates (within split)", _duplicates_table(s))
+    _print_section(console, "Identifier namespace issues", _namespace_table(s))
+    _print_section(console, "Quality filter flags", _quality_table(s))
+
+    total_issues = _total_issue_count(s)
+    if total_issues == 0:
+        console.rule("[bold green]✓ OVERALL PASS - no issues detected[/]", style="green")
+    else:
+        console.rule(
+            f"[bold red]✗ OVERALL FAIL - {total_issues} issue(s) flagged[/]", style="red"
+        )
+    console.print(f"Full detailed report written to: [bold]{report_output}[/]")
 
 
 def _fmt_location(location: dict) -> str:

@@ -89,9 +89,12 @@ report_format = "json"               # default "json"; also accepts "txt"
 
 ## Output
 
-**stdout**: a summary dashboard with row counts, unparseable SMILES, exact
-vs. Tanimoto leakage counts, internal duplicate counts per representation and
-identifier column, namespace issue counts, and quality-filter counts.
+**stdout**: a colour-coded (via [rich](https://github.com/Textualize/rich))
+summary dashboard with row counts, unparseable SMILES, and one table per
+check category (exact/Tanimoto leakage, internal duplicates, identifier
+namespace issues, quality filters) — green checkmarks for clean results, red
+crosses with counts for flagged findings — followed by an overall PASS/FAIL
+banner.
 
 **Report file** (written to `paths.report_output`, in the format chosen by
 `settings.report_format`): the full detail behind every summary count,
