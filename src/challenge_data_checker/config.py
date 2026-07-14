@@ -55,7 +55,9 @@ class SettingsConfig:
         fp_radius: Morgan fingerprint radius.
         fp_n_bits: Morgan fingerprint bit-vector length.
         report_format: Output format for the audit report, ``"json"`` or
-            ``"txt"``.
+            ``"txt"``. If not set explicitly in the config, it is inferred
+            from ``paths.report_output``'s file extension: ``.txt`` implies
+            ``"txt"``, anything else implies ``"json"``.
 
     """
 
@@ -181,12 +183,17 @@ def load_config(config_path: str | Path) -> Config:
         identifier_columns=list(identifier_columns_raw),
     )
 
+    if "report_format" in settings_raw:
+        report_format = str(settings_raw["report_format"]).lower()
+    else:
+        report_format = "txt" if Path(paths.report_output).suffix.lower() == ".txt" else "json"
+
     settings = SettingsConfig(
         tautomer_standardisation=bool(settings_raw.get("tautomer_standardisation", False)),
         max_train_test_similarity=float(settings_raw.get("max_train_test_similarity", 1.0)),
         fp_radius=int(settings_raw.get("fp_radius", 2)),
         fp_n_bits=int(settings_raw.get("fp_n_bits", 2048)),
-        report_format=str(settings_raw.get("report_format", "json")).lower(),
+        report_format=report_format,
     )
 
     if not 0.0 <= settings.max_train_test_similarity <= 1.0:

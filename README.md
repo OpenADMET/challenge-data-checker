@@ -82,10 +82,11 @@ report_format = "json"               # default "json"; also accepts "txt"
 - `settings.max_train_test_similarity`: pairs with Tanimoto similarity **>=**
   this threshold are flagged (excluding pairs already caught by exact
   InChIKey matches, which are reported separately).
-- `settings.report_format`: `"json"` (default) for machine-readable output,
-  or `"txt"` for a human-readable plain-text rendering of the same findings.
-  `report_output` can be given any filename/extension you like — the format
-  written is controlled entirely by this setting, not by the file extension.
+- `settings.report_format`: `"json"` for machine-readable output, or `"txt"`
+  for a human-readable plain-text rendering of the same findings. If omitted,
+  it's inferred from `report_output`'s extension — `.txt` implies `"txt"`,
+  anything else implies `"json"` — so you rarely need to set it explicitly.
+  Set it to override that inference (e.g. write JSON to a `.txt` path).
 
 ## Output
 

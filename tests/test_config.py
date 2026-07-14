@@ -60,6 +60,51 @@ report_format = "TXT"
     assert config.settings.report_format == "txt"
 
 
+def test_report_format_inferred_txt_from_extension(tmp_path):
+    content = """
+[paths]
+train_files = ["train.csv"]
+test_files = ["test.csv"]
+report_output = "report.txt"
+
+[columns]
+smiles_column = "SMILES"
+"""
+    config = load_config(write_toml(tmp_path, content))
+    assert config.settings.report_format == "txt"
+
+
+def test_report_format_inferred_json_from_other_extension(tmp_path):
+    content = """
+[paths]
+train_files = ["train.csv"]
+test_files = ["test.csv"]
+report_output = "report.dat"
+
+[columns]
+smiles_column = "SMILES"
+"""
+    config = load_config(write_toml(tmp_path, content))
+    assert config.settings.report_format == "json"
+
+
+def test_report_format_explicit_overrides_txt_extension_inference(tmp_path):
+    content = """
+[paths]
+train_files = ["train.csv"]
+test_files = ["test.csv"]
+report_output = "report.txt"
+
+[columns]
+smiles_column = "SMILES"
+
+[settings]
+report_format = "json"
+"""
+    config = load_config(write_toml(tmp_path, content))
+    assert config.settings.report_format == "json"
+
+
 def test_missing_config_file_raises(tmp_path):
     with pytest.raises(ConfigError, match="not found"):
         load_config(tmp_path / "does_not_exist.toml")
