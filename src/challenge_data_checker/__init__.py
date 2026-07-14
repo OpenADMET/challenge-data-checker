@@ -2,6 +2,6 @@
 
 from challenge_data_checker.api import audit
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 
 __all__ = ["audit", "__version__"]

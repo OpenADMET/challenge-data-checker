@@ -228,19 +228,19 @@ def _build_summary_lines(report: dict) -> list[str]:
         "",
         "Train-test leakage",
         (
-            f"  Exact match (raw/canonical/InChIKey) - train molecules leaked: "
+            f"  Train compounds in train/test overlap (raw/canonical/InChIKey): "
             f"{s['total_exact_leaked_train_molecules']}"
         ),
         (
-            f"  Exact match (raw/canonical/InChIKey) - test molecules leaked : "
+            f"  Test compounds in train/test overlap (raw/canonical/InChIKey) : "
             f"{s['total_exact_leaked_test_molecules']}"
         ),
         (
-            f"  Identifier overlap events                                    : "
+            f"  Identifier overlap events                                     : "
             f"{s['total_identifier_leakage_events']}"
         ),
         (
-            f"  Tanimoto similarity flags (>= threshold)                     : "
+            f"  Tanimoto similarity flags (>= threshold)                      : "
             f"{s['total_tanimoto_leakage_pairs']}"
         ),
         "",
@@ -355,11 +355,11 @@ def _leakage_table(s: dict) -> Table:
     """
     table = _new_table(["Check", "Result"])
     table.add_row(
-        "Exact match - train molecules leaked",
+        "Train compounds in train/test overlap",
         _status_cell(s["total_exact_leaked_train_molecules"]),
     )
     table.add_row(
-        "Exact match - test molecules leaked",
+        "Test compounds in train/test overlap",
         _status_cell(s["total_exact_leaked_test_molecules"]),
     )
     table.add_row("Identifier overlap events", _status_cell(s["total_identifier_leakage_events"]))
