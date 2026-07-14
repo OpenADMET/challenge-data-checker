@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 
 import pytest
 
@@ -49,6 +50,7 @@ def test_build_report_contains_expected_top_level_keys(tmp_path):
     report = build_report(config, train, test, ["compound_id"])
 
     for key in (
+        "generated_at",
         "config",
         "summary",
         "unparseable_smiles",
@@ -62,6 +64,17 @@ def test_build_report_contains_expected_top_level_keys(tmp_path):
     assert report["summary"]["total_train_rows"] == 1
     assert report["summary"]["total_test_rows"] == 1
     assert report["config"]["report_format"] == "json"
+
+
+def test_build_report_generated_at_is_a_valid_recent_timestamp(tmp_path):
+    config = make_config(tmp_path)
+    before = datetime.now().astimezone().replace(microsecond=0)
+
+    report = build_report(config, [], [], [])
+
+    after = datetime.now().astimezone()
+    generated_at = datetime.fromisoformat(report["generated_at"])
+    assert before <= generated_at <= after
 
 
 def test_save_report_writes_valid_json(tmp_path):
@@ -148,6 +161,7 @@ def test_format_report_as_text_renders_all_sections(tmp_path):
     assert "identifier[compound_id] = 'ID_A'" in text
     # namespace mismatch: same structure, two different ids across pools
     assert "multiple identifiers" in text
+    assert f"Generated: {report['generated_at']}" in text
 
 
 def test_print_summary_runs_without_error(tmp_path, capsys):
@@ -160,3 +174,4 @@ def test_print_summary_runs_without_error(tmp_path, capsys):
     captured = capsys.readouterr()
     assert "challenge-data-checker audit summary" in captured.out
     assert "Rows processed" in captured.out
+    assert report["generated_at"] in captured.out

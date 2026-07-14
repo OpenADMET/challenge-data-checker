@@ -1,6 +1,7 @@
 """Assembling the audit report (JSON or text) and the stdout summary dashboard."""
 
 import json
+from datetime import datetime
 from pathlib import Path
 
 from rich import box
@@ -82,6 +83,7 @@ def build_report(
         counts, and the detailed findings from every check.
 
     """
+    generated_at = datetime.now().astimezone().isoformat(timespec="seconds")
     all_records = train_records + test_records
 
     unparseable = unparseable_entries(all_records)
@@ -140,6 +142,7 @@ def build_report(
     }
 
     return {
+        "generated_at": generated_at,
         "config": {
             "train_files": [describe_source(s, i) for i, s in enumerate(config.paths.train_files)],
             "test_files": [describe_source(s, i) for i, s in enumerate(config.paths.test_files)],
@@ -495,6 +498,7 @@ def print_summary(report: dict, report_output: str | Path | None) -> None:
 
     renderables: list[RenderableType] = [
         Rule("[bold cyan]challenge-data-checker audit summary[/]", style="cyan"),
+        f"  Generated          : {report['generated_at']}",
         f"  Rows processed     : [bold]train[/]={s['total_train_rows']}  "
         f"[bold]test[/]={s['total_test_rows']}",
         f"  Unparseable SMILES : "
@@ -711,6 +715,7 @@ def format_report_as_text(report: dict) -> str:
         "=" * 72,
         "challenge-data-checker audit report",
         "=" * 72,
+        f"Generated: {report['generated_at']}",
         "",
         "Configuration",
         "-------------",
