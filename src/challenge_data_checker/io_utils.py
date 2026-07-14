@@ -2,10 +2,15 @@
 
 import logging
 from pathlib import Path
+from typing import Sequence
 
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+# A single train/test data source: a file path, or an already-loaded DataFrame
+# (e.g. passed in directly from a Jupyter notebook via the Python API).
+type DataSource = str | Path | pd.DataFrame
 
 # Known alternate names for a SMILES column, used only when neither an exact
 # nor a case-insensitive match to the configured name is found.
@@ -50,6 +55,29 @@ def load_table(path: str | Path) -> pd.DataFrame:
     if suffix == ".parquet":
         return pd.read_parquet(path)
     raise ValueError(f"Unsupported file format '{suffix}' for {path}. Use .csv or .parquet.")
+
+
+def describe_source(source: DataSource, index: int) -> str:
+    """Build a human-readable label identifying a train/test data source.
+
+    Used both as the ``source_file`` tag on every row pooled from ``source``
+    and (via ``report.build_report``) in the report's echoed configuration,
+    so a finding's location and the config section refer to the source the
+    same way.
+
+    Args:
+        source: A file path, or an in-memory DataFrame.
+        index: The source's position in its train/test list, used to
+            distinguish multiple in-memory DataFrames from one another.
+
+    Returns:
+        The path as a string, or ``"<in-memory dataframe #N (R rows)>"`` for
+        a DataFrame.
+
+    """
+    if isinstance(source, pd.DataFrame):
+        return f"<in-memory dataframe #{index} ({len(source)} rows)>"
+    return str(source)
 
 
 def resolve_smiles_column(columns: list[str], configured_name: str) -> str:
@@ -138,40 +166,42 @@ def check_identifier_columns(
 
 
 def load_pool(
-    files: list[str], smiles_column: str, identifier_columns: list[str]
+    sources: Sequence[DataSource], smiles_column: str, identifier_columns: list[str]
 ) -> tuple[pd.DataFrame, list[str]]:
-    """Load and concatenate a list of data files into a single pool.
+    """Load and concatenate a list of data sources into a single pool.
 
-    Each file's SMILES column is independently resolved (exact/case-insensitive/
+    Each source's SMILES column is independently resolved (exact/case-insensitive/
     alias fuzzy match) and renamed to a fixed internal name so downstream code
     doesn't need to know the original column name. Each row is tagged with its
-    source file and original row index within that file. Identifier columns
-    missing from a given file are logged as a warning and simply left absent
-    (pandas fills them with NaN after concatenation).
+    source label (see ``describe_source``) and original row index within that
+    source. Identifier columns missing from a given source are logged as a
+    warning and simply left absent (pandas fills them with NaN after
+    concatenation).
 
     Args:
-        files: Paths to the .csv/.parquet files to load and pool together.
+        sources: Paths to .csv/.parquet files and/or already-loaded DataFrames
+            to load (if needed) and pool together.
         smiles_column: The configured SMILES column name to resolve in each
-            file.
+            source.
         identifier_columns: Identifier column names from the config.
 
     Returns:
         A tuple of the pooled DataFrame and the list of identifier columns
-        present in at least one of the files (used for later checks).
+        present in at least one of the sources (used for later checks).
 
     """
     frames = []
     identifier_columns_seen: list[str] = []
-    for file in files:
-        df = load_table(file)
-        df = df.copy()
+    for i, source in enumerate(sources):
+        df = source.copy() if isinstance(source, pd.DataFrame) else load_table(source)
+        label = describe_source(source, i)
         resolved_smiles_col = resolve_smiles_column(list(df.columns), smiles_column)
         df = df.rename(columns={resolved_smiles_col: RESOLVED_SMILES_COL})
-        present = check_identifier_columns(list(df.columns), identifier_columns, file)
+        present = check_identifier_columns(list(df.columns), identifier_columns, label)
         for col in present:
             if col not in identifier_columns_seen:
                 identifier_columns_seen.append(col)
-        df[SOURCE_FILE_COL] = str(file)
+        df[SOURCE_FILE_COL] = label
         df[ROW_INDEX_COL] = df.index
         frames.append(df)
     pooled = pd.concat(frames, ignore_index=True)

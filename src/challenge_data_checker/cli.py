@@ -4,10 +4,9 @@ import argparse
 import logging
 import sys
 
-from challenge_data_checker.chemistry import MoleculeProcessor, process_pool
 from challenge_data_checker.config import ConfigError, load_config
-from challenge_data_checker.io_utils import ColumnResolutionError, load_pool
-from challenge_data_checker.report import build_report, print_summary, save_report
+from challenge_data_checker.core import run_audit
+from challenge_data_checker.io_utils import ColumnResolutionError
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -43,32 +42,7 @@ def run(config_path: str) -> dict:
 
     """
     config = load_config(config_path)
-
-    train_df, train_identifier_cols = load_pool(
-        config.paths.train_files, config.columns.smiles_column, config.columns.identifier_columns
-    )
-    test_df, test_identifier_cols = load_pool(
-        config.paths.test_files, config.columns.smiles_column, config.columns.identifier_columns
-    )
-    # A column may be entirely absent from one pool's files (e.g. only present in
-    # train). Each pool is only processed with the identifier columns it actually
-    # has; the union is used afterwards for cross-pool checks and reporting, since
-    # MoleculeRecord.identifiers.get(col) gracefully returns None for a pool that
-    # never saw that column.
-    identifier_columns = [
-        col
-        for col in config.columns.identifier_columns
-        if col in train_identifier_cols or col in test_identifier_cols
-    ]
-
-    processor = MoleculeProcessor(config.settings)
-    train_records = process_pool(train_df, "train", train_identifier_cols, processor)
-    test_records = process_pool(test_df, "test", test_identifier_cols, processor)
-
-    report = build_report(config, train_records, test_records, identifier_columns)
-    save_report(report, config.paths.report_output, config.settings.report_format)
-    print_summary(report, config.paths.report_output)
-    return report
+    return run_audit(config)
 
 
 def main(argv: list[str] | None = None) -> int:

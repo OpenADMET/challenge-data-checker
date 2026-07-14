@@ -88,6 +88,41 @@ report_format = "json"               # default "json"; also accepts "txt"
   anything else implies `"json"` — so you rarely need to set it explicitly.
   Set it to override that inference (e.g. write JSON to a `.txt` path).
 
+### Python API
+
+For interactive use (e.g. a Jupyter notebook), call `audit()` directly instead
+of writing a TOML config — every setting is a keyword argument, and
+`train`/`test` each accept a single `.csv`/`.parquet` path, a single
+DataFrame, or a list mixing either:
+
+```python
+import pandas as pd
+from challenge_data_checker import audit
+
+train_df = pd.read_csv("data/train_hub.csv")
+test_df = pd.read_csv("data/test_blind.csv")
+
+report = audit(
+    train=train_df,
+    test=test_df,
+    identifier_columns=["compound_id", "external_reg_no"],
+    max_train_test_similarity=0.95,
+)
+```
+
+`report` is the same dict written to `report_output` by the CLI. All
+`[settings]` keys are available as keyword arguments (`smiles_column`,
+`identifier_columns`, `tautomer_standardisation`, `max_train_test_similarity`,
+`fp_radius`, `fp_n_bits`). `report_output`/`report_format` work the same way
+as in the config file, except both are optional: omit `report_output` to skip
+writing a file entirely and only get the dict back. Pass `print_report=False`
+to suppress the stdout dashboard (e.g. in a notebook loop over many configs).
+
+Data sources can be mixed freely, e.g. `train=[train_df, "data/extra.csv"]`.
+In the report, an in-memory DataFrame is labelled
+`<in-memory dataframe #N (R rows)>` (by its position in the list) wherever a
+file path would otherwise appear.
+
 ## Output
 
 **stdout**: a colour-coded (via [rich](https://github.com/Textualize/rich))

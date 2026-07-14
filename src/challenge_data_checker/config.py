@@ -3,6 +3,9 @@
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Sequence
+
+from challenge_data_checker.io_utils import DataSource
 
 
 class ConfigError(ValueError):
@@ -14,19 +17,23 @@ VALID_REPORT_FORMATS = {"json", "txt"}
 
 @dataclass(frozen=True)
 class PathsConfig:
-    """File paths declared in the ``[paths]`` section of the config.
+    """Train/test data sources and report destination.
 
     Attributes:
-        train_files: Paths to the training data files (.csv or .parquet).
-        test_files: Paths to the test data files (.csv or .parquet).
+        train_files: Training data sources: paths to .csv/.parquet files
+            and/or already-loaded DataFrames (the latter only when built
+            directly via the Python API, never from a TOML config).
+        test_files: Test data sources, in the same shapes as ``train_files``.
         report_output: Path the audit report will be written to, in the
-            format given by ``settings.report_format``.
+            format given by ``settings.report_format``, or ``None`` to skip
+            writing a report file (Python API only; a TOML config always
+            requires this).
 
     """
 
-    train_files: list[str]
-    test_files: list[str]
-    report_output: str
+    train_files: Sequence[DataSource]
+    test_files: Sequence[DataSource]
+    report_output: str | Path | None
 
 
 @dataclass(frozen=True)
@@ -84,6 +91,27 @@ class Config:
     columns: ColumnsConfig
     settings: SettingsConfig
     config_path: Path
+
+
+def infer_report_format(explicit: str | None, report_output: str | Path | None) -> str:
+    """Resolve the report format, inferring it from the output path when unset.
+
+    Args:
+        explicit: The user-specified ``report_format``, or ``None`` if not
+            set.
+        report_output: The path the report will be written to, or ``None``
+            if it won't be written to disk.
+
+    Returns:
+        ``explicit`` (lowercased) if given; otherwise ``"txt"`` if
+        ``report_output`` ends in ``.txt``, otherwise ``"json"``.
+
+    """
+    if explicit is not None:
+        return explicit.lower()
+    if report_output is not None and Path(report_output).suffix.lower() == ".txt":
+        return "txt"
+    return "json"
 
 
 def _require(section: dict, key: str, section_name: str) -> object:
@@ -183,10 +211,10 @@ def load_config(config_path: str | Path) -> Config:
         identifier_columns=list(identifier_columns_raw),
     )
 
-    if "report_format" in settings_raw:
-        report_format = str(settings_raw["report_format"]).lower()
-    else:
-        report_format = "txt" if Path(paths.report_output).suffix.lower() == ".txt" else "json"
+    explicit_format = (
+        str(settings_raw["report_format"]) if "report_format" in settings_raw else None
+    )
+    report_format = infer_report_format(explicit_format, paths.report_output)
 
     settings = SettingsConfig(
         tautomer_standardisation=bool(settings_raw.get("tautomer_standardisation", False)),

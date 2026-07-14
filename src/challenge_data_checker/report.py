@@ -16,6 +16,7 @@ from challenge_data_checker.checks import (
     unparseable_entries,
 )
 from challenge_data_checker.config import Config
+from challenge_data_checker.io_utils import describe_source
 from challenge_data_checker.models import MoleculeRecord
 
 
@@ -139,8 +140,8 @@ def build_report(
 
     return {
         "config": {
-            "train_files": config.paths.train_files,
-            "test_files": config.paths.test_files,
+            "train_files": [describe_source(s, i) for i, s in enumerate(config.paths.train_files)],
+            "test_files": [describe_source(s, i) for i, s in enumerate(config.paths.test_files)],
             "smiles_column": config.columns.smiles_column,
             "identifier_columns": identifier_columns,
             "tautomer_standardisation": config.settings.tautomer_standardisation,
@@ -352,9 +353,7 @@ def _leakage_table(s: dict) -> Table:
         "Exact match - test molecules leaked",
         _status_cell(s["total_exact_leaked_test_molecules"]),
     )
-    table.add_row(
-        "Identifier overlap events", _status_cell(s["total_identifier_leakage_events"])
-    )
+    table.add_row("Identifier overlap events", _status_cell(s["total_identifier_leakage_events"]))
     table.add_row(
         "Tanimoto similarity flags (>= threshold)",
         _status_cell(s["total_tanimoto_leakage_pairs"]),
@@ -469,7 +468,7 @@ def _total_issue_count(s: dict) -> int:
     )
 
 
-def print_summary(report: dict, report_output: str | Path) -> None:
+def print_summary(report: dict, report_output: str | Path | None) -> None:
     """Print the stdout summary dashboard for a completed audit report.
 
     Renders row counts, unparseable SMILES, and one colored table per check
@@ -479,7 +478,8 @@ def print_summary(report: dict, report_output: str | Path) -> None:
     Args:
         report: The report dict, as returned by ``build_report``.
         report_output: Path the full report was written to, shown in the
-            final line of the dashboard.
+            final line of the dashboard, or ``None`` if it wasn't written to
+            disk (that line is then omitted).
     """
     console = Console(highlight=False)
     s = report["summary"]
@@ -505,10 +505,9 @@ def print_summary(report: dict, report_output: str | Path) -> None:
     if total_issues == 0:
         console.rule("[bold green]✓ OVERALL PASS - no issues detected[/]", style="green")
     else:
-        console.rule(
-            f"[bold red]✗ OVERALL FAIL - {total_issues} issue(s) flagged[/]", style="red"
-        )
-    console.print(f"Full detailed report written to: [bold]{report_output}[/]")
+        console.rule(f"[bold red]✗ OVERALL FAIL - {total_issues} issue(s) flagged[/]", style="red")
+    if report_output is not None:
+        console.print(f"Full detailed report written to: [bold]{report_output}[/]")
 
 
 def _fmt_location(location: dict) -> str:
