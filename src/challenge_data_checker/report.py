@@ -4,7 +4,8 @@ import json
 from pathlib import Path
 
 from rich import box
-from rich.console import Console
+from rich.console import Console, Group, RenderableType
+from rich.rule import Rule
 from rich.table import Table
 
 from challenge_data_checker.checks import (
@@ -318,21 +319,26 @@ def _new_table(columns: list[str]) -> Table:
     return table
 
 
-def _print_section(console: Console, title: str, table: Table | None) -> None:
-    """Print a bold section heading followed by its table (or a placeholder).
+def _section_renderables(title: str, table: Table | None) -> list[RenderableType]:
+    """Build the renderables for one dashboard section: heading, body, blank line.
+
+    Kept separate from the table (or a placeholder) rather than printed
+    directly, so the whole dashboard can be assembled into a single ``Group``
+    and printed in one ``console.print`` call (see ``print_summary``) instead
+    of one call per section — a Jupyter notebook renders every individual
+    ``console.print`` as its own separate output block, which fragments the
+    dashboard if it's built from many small print calls.
 
     Args:
-        console: The rich console to print to.
         title: The section heading text.
-        table: The table to print, or ``None`` to print a "(none)"
+        table: The table to render, or ``None`` to render a "(none)"
             placeholder instead (e.g. no identifier columns configured).
+
+    Returns:
+        The renderables for this section, in display order.
     """
-    console.print(f"[bold cyan]{title}[/]")
-    if table is not None:
-        console.print(table)
-    else:
-        console.print("  (no identifier columns configured/available)")
-    console.print()
+    placeholder = "  (no identifier columns configured/available)"
+    return [f"[bold cyan]{title}[/]", table if table is not None else placeholder, ""]
 
 
 def _leakage_table(s: dict) -> Table:
@@ -473,7 +479,11 @@ def print_summary(report: dict, report_output: str | Path | None) -> None:
 
     Renders row counts, unparseable SMILES, and one colored table per check
     category (green checkmarks for clean results, red crosses with counts
-    for flagged findings), followed by an overall PASS/FAIL banner.
+    for flagged findings), followed by an overall PASS/FAIL banner. The whole
+    dashboard is assembled into a single rich ``Group`` and printed with one
+    ``console.print`` call so it renders as one contiguous block rather than
+    several (in a Jupyter notebook, each individual ``console.print`` call
+    renders as its own separate output).
 
     Args:
         report: The report dict, as returned by ``build_report``.
@@ -481,33 +491,37 @@ def print_summary(report: dict, report_output: str | Path | None) -> None:
             final line of the dashboard, or ``None`` if it wasn't written to
             disk (that line is then omitted).
     """
-    console = Console(highlight=False)
     s = report["summary"]
 
-    console.rule("[bold cyan]challenge-data-checker audit summary[/]", style="cyan")
-    console.print(
+    renderables: list[RenderableType] = [
+        Rule("[bold cyan]challenge-data-checker audit summary[/]", style="cyan"),
         f"  Rows processed     : [bold]train[/]={s['total_train_rows']}  "
-        f"[bold]test[/]={s['total_test_rows']}"
-    )
-    console.print(
+        f"[bold]test[/]={s['total_test_rows']}",
         f"  Unparseable SMILES : "
         f"[{_count_style(s['total_unparseable'])}]{s['total_unparseable']}[/] "
-        f"(train={s['total_unparseable_train']}, test={s['total_unparseable_test']})"
+        f"(train={s['total_unparseable_train']}, test={s['total_unparseable_test']})",
+        "",
+    ]
+    renderables.extend(_section_renderables("Train-test leakage", _leakage_table(s)))
+    renderables.extend(
+        _section_renderables("Internal duplicates (within split)", _duplicates_table(s))
     )
-    console.print()
-
-    _print_section(console, "Train-test leakage", _leakage_table(s))
-    _print_section(console, "Internal duplicates (within split)", _duplicates_table(s))
-    _print_section(console, "Identifier namespace issues", _namespace_table(s))
-    _print_section(console, "Quality filter flags", _quality_table(s))
+    renderables.extend(_section_renderables("Identifier namespace issues", _namespace_table(s)))
+    renderables.extend(_section_renderables("Quality filter flags", _quality_table(s)))
 
     total_issues = _total_issue_count(s)
     if total_issues == 0:
-        console.rule("[bold green]✓ OVERALL PASS - no issues detected[/]", style="green")
+        renderables.append(
+            Rule("[bold green]✓ OVERALL PASS - no issues detected[/]", style="green")
+        )
     else:
-        console.rule(f"[bold red]✗ OVERALL FAIL - {total_issues} issue(s) flagged[/]", style="red")
+        renderables.append(
+            Rule(f"[bold red]✗ OVERALL FAIL - {total_issues} issue(s) flagged[/]", style="red")
+        )
     if report_output is not None:
-        console.print(f"Full detailed report written to: [bold]{report_output}[/]")
+        renderables.append(f"Full detailed report written to: [bold]{report_output}[/]")
+
+    Console(highlight=False).print(Group(*renderables))
 
 
 def _fmt_location(location: dict) -> str:
