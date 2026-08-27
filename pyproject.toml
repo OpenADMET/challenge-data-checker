@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "challenge-data-checker"
-version = "0.2.2"
+version = "0.3.0"
 description = "Audit ML benchmarking train/test splits for chemical data leakage and data quality issues."
 requires-python = ">=3.12,<3.13"
 dependencies = [
@@ -16,6 +16,7 @@ dependencies = [
 
 [project.optional-dependencies]
 parquet = ["pyarrow"]
+remote = ["huggingface_hub", "requests"]
 test = ["pytest", "pytest-cov"]
 
 [project.scripts]

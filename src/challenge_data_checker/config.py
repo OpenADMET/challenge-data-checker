@@ -20,9 +20,10 @@ class PathsConfig:
     """Train/test data sources and report destination.
 
     Attributes:
-        train_files: Training data sources: paths to .csv/.parquet files
-            and/or already-loaded DataFrames (the latter only when built
-            directly via the Python API, never from a TOML config).
+        train_files: Training data sources: paths to .csv/.parquet files,
+            URLs to remote .csv/.parquet files (HuggingFace Hub or plain
+            HTTP(S)), and/or already-loaded DataFrames (the latter only when
+            built directly via the Python API, never from a TOML config).
         test_files: Test data sources, in the same shapes as ``train_files``.
         report_output: Path the audit report will be written to, in the
             format given by ``settings.report_format``, or ``None`` to skip

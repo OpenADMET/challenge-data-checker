@@ -60,6 +60,22 @@ def test_load_pool_renames_smiles_and_tags_provenance(tmp_path):
     assert list(pooled[ROW_INDEX_COL]) == [0, 0]
 
 
+def test_load_pool_resolves_remote_url_source(tmp_path, monkeypatch):
+    downloaded_file = tmp_path / "downloaded.csv"
+    pd.DataFrame({"SMILES": ["CCO"]}).to_csv(downloaded_file, index=False)
+
+    url = "https://huggingface.co/datasets/org/dataset/resolve/main/test.csv"
+    monkeypatch.setattr(
+        "challenge_data_checker.io_utils.resolve_remote_source",
+        lambda source: downloaded_file,
+    )
+
+    pooled, _ = load_pool([url], "SMILES", [])
+
+    assert list(pooled[RESOLVED_SMILES_COL]) == ["CCO"]
+    assert list(pooled[SOURCE_FILE_COL]) == [url]
+
+
 def test_load_pool_missing_identifier_in_one_file_does_not_crash(tmp_path, caplog):
     file_a = tmp_path / "a.csv"
     file_b = tmp_path / "b.csv"

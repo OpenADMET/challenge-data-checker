@@ -6,9 +6,10 @@ issues. Built for sequential processing of datasets up to ~10,000 molecules.
 
 ## Features
 
-- Loads train/test data from `.csv` or `.parquet` files, with fuzzy SMILES
-  column matching (falls back to case-insensitive and common alias matching,
-  e.g. `structure`, `smi`, `mol`).
+- Loads train/test data from `.csv` or `.parquet` files, local or hosted
+  remotely (HuggingFace Hub or any other URL), with fuzzy SMILES column
+  matching (falls back to case-insensitive and common alias matching, e.g.
+  `structure`, `smi`, `mol`).
 - Parses every SMILES with RDKit, with optional tautomer standardisation, and
   computes canonical SMILES, InChIKey, and a stereo-blind Morgan fingerprint.
 - **Train-test leakage**: exact matches on raw SMILES, canonical SMILES,
@@ -37,11 +38,13 @@ the package in editable mode:
 ```bash
 conda env create -f environment.yml
 conda activate challenge-data-checker
-pip install -e ".[parquet,test]"
+pip install -e ".[parquet,test,remote]"
 ```
 
 The `parquet` extra pulls in `pyarrow` (only needed if your data files are
-`.parquet`); the `test` extra pulls in `pytest`/`pytest-cov` for development.
+`.parquet`); the `test` extra pulls in `pytest`/`pytest-cov` for development;
+the `remote` extra pulls in `huggingface_hub`/`requests` (only needed if a
+`train_files`/`test_files` entry is a URL — see below).
 
 ## Usage
 
@@ -73,7 +76,8 @@ report_format = "json"               # default "json"; also accepts "txt"
 ```
 
 - `paths.train_files` / `paths.test_files`: one or more `.csv`/`.parquet`
-  files, pooled together into a single training/test set respectively.
+  files (local paths and/or URLs, freely mixed), pooled together into a
+  single training/test set respectively.
 - `columns.smiles_column`: resolved per file — exact match first, then
   case-insensitive, then a unique alias match (`smiles`, `smi`, `structure`,
   `canonical_smiles`, `molecule`, `mol`).
@@ -88,12 +92,40 @@ report_format = "json"               # default "json"; also accepts "txt"
   anything else implies `"json"` — so you rarely need to set it explicitly.
   Set it to override that inference (e.g. write JSON to a `.txt` path).
 
+### Remote data sources
+
+Any `train_files`/`test_files` entry can be a URL instead of a local path —
+useful for a blinded test set hosted on HuggingFace Hub or in a private
+GitHub repo:
+
+```toml
+[paths]
+train_files = ["data/train_hub.csv"]
+test_files = [
+    "https://huggingface.co/datasets/<org>/<dataset>/resolve/main/test_blinded.csv",
+    "https://raw.githubusercontent.com/<org>/<repo>/<ref>/test_blinded.csv?token=<TOKEN>",
+]
+```
+
+- A `huggingface.co/datasets/.../resolve/.../...` or `.../blob/.../...` URL
+  (as copied from the Hub's "Files" tab, or a Hub download link) is fetched
+  via `huggingface_hub`, which also caches it locally by repo/revision.
+  Requires the `remote` extra. For a private/gated dataset, set the `HF_TOKEN`
+  environment variable or run `huggingface-cli login` beforehand — there is
+  no token field in the config.
+- Any other `http(s)://` URL (e.g. a GitHub raw-content link) is downloaded
+  directly. Requires the `remote` extra. For a private repo, include a valid
+  access token in the URL itself, the same way you would in a browser.
+- A failed download (bad URL, missing/expired token, network error) raises a
+  clear error before any audit checks run.
+
 ### Python API
 
 For interactive use (e.g. a Jupyter notebook), call `audit()` directly instead
 of writing a TOML config — every setting is a keyword argument, and
-`train`/`test` each accept a single `.csv`/`.parquet` path, a single
-DataFrame, or a list mixing either:
+`train`/`test` each accept a single `.csv`/`.parquet` path or URL (see
+[Remote data sources](#remote-data-sources)), a single DataFrame, or a list
+mixing any of these:
 
 ```python
 import pandas as pd

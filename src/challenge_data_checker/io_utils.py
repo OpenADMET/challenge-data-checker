@@ -6,10 +6,13 @@ from typing import Sequence
 
 import pandas as pd
 
+from challenge_data_checker.remote import is_remote_source, resolve_remote_source
+
 logger = logging.getLogger(__name__)
 
-# A single train/test data source: a file path, or an already-loaded DataFrame
-# (e.g. passed in directly from a Jupyter notebook via the Python API).
+# A single train/test data source: a file path, a URL to a remote file
+# (HuggingFace Hub or plain HTTP(S)), or an already-loaded DataFrame (e.g.
+# passed in directly from a Jupyter notebook via the Python API).
 type DataSource = str | Path | pd.DataFrame
 
 # Known alternate names for a SMILES column, used only when neither an exact
@@ -179,8 +182,9 @@ def load_pool(
     concatenation).
 
     Args:
-        sources: Paths to .csv/.parquet files and/or already-loaded DataFrames
-            to load (if needed) and pool together.
+        sources: Paths to .csv/.parquet files, URLs to remote .csv/.parquet
+            files (HuggingFace Hub or plain HTTP(S)), and/or already-loaded
+            DataFrames to load (if needed) and pool together.
         smiles_column: The configured SMILES column name to resolve in each
             source.
         identifier_columns: Identifier column names from the config.
@@ -193,7 +197,15 @@ def load_pool(
     frames = []
     identifier_columns_seen: list[str] = []
     for i, source in enumerate(sources):
-        df = source.copy() if isinstance(source, pd.DataFrame) else load_table(source)
+        if isinstance(source, pd.DataFrame):
+            df = source.copy()
+        else:
+            local_path = (
+                resolve_remote_source(source)
+                if isinstance(source, str) and is_remote_source(source)
+                else source
+            )
+            df = load_table(local_path)
         label = describe_source(source, i)
         resolved_smiles_col = resolve_smiles_column(list(df.columns), smiles_column)
         df = df.rename(columns={resolved_smiles_col: RESOLVED_SMILES_COL})
