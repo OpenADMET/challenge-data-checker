@@ -1,5 +1,8 @@
 # challenge-data-checker
 
+[![Tests](https://github.com/OpenADMET/challenge-data-checker/actions/workflows/tests.yml/badge.svg)](https://github.com/OpenADMET/challenge-data-checker/actions/workflows/tests.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+
 A command-line tool that audits machine learning benchmarking datasets
 (train/test splits) for chemical data leakage, duplicates, and data quality
 issues. Built for sequential processing of datasets up to ~10,000 molecules.
@@ -185,3 +188,13 @@ ruff check src tests         # lint
 mypy src                     # type check
 pydoclint src                # docstring style/consistency check
 ```
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full contribution workflow, including
+how we use the [Developer Certificate of Origin](https://developercertificate.org/)
+and our policy on AI-assisted contributions.
+
+## License
+
+Apache License 2.0 — see [`LICENSE`](LICENSE). See [`CHANGELOG.md`](CHANGELOG.md)
+for release history, and [`CITATION.cff`](CITATION.cff) if you use this tool in
+your work.
