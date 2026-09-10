@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question / usage help
+    url: https://github.com/OpenADMET/challenge-data-checker/discussions
+    about: Use Discussions for "how do I…" and usage questions. Issues are for bugs and feature requests.
+  - name: Security vulnerability
+    url: https://github.com/OpenADMET/challenge-data-checker/security/policy
+    about: Do not file a public issue. See SECURITY.md.

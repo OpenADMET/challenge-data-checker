@@ -1,0 +1,57 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -el {0}  # required for micromamba env activation
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up micromamba environment
+        uses: mamba-org/setup-micromamba@add3a49764cedee8ee24e82dfde87f5bc2914462 # v2.0.7
+        with:
+          environment-file: environment.yml
+          cache-environment: true
+
+      - name: Install package
+        run: pip install -e ".[parquet,test,remote]"
+
+      - name: Lint (ruff)
+        run: ruff check src tests
+
+      - name: Format check (black)
+        run: black --check src tests
+
+      - name: Type check (mypy)
+        run: mypy src
+
+      - name: Docstring check (pydoclint)
+        run: pydoclint src
+
+      - name: Run tests
+        run: pytest --cov=challenge_data_checker --cov-report=term-missing
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-report
+          path: .coverage
+          if-no-files-found: ignore

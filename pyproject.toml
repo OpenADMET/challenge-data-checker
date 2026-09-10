@@ -1,0 +1,71 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "challenge-data-checker"
+version = "0.3.0"
+description = "Audit ML benchmarking train/test splits for chemical data leakage and data quality issues."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [
+    { name = "OpenADMET" },
+    { name = "Open Molecular Software Foundation" },
+]
+requires-python = ">=3.12,<3.13"
+keywords = ["cheminformatics", "data leakage", "benchmarking", "machine learning", "ADMET", "RDKit"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+    "pandas",
+    "numpy",
+    "rdkit",
+    "rich",
+]
+
+[project.urls]
+Homepage = "https://github.com/OpenADMET/challenge-data-checker"
+Repository = "https://github.com/OpenADMET/challenge-data-checker"
+Issues = "https://github.com/OpenADMET/challenge-data-checker/issues"
+Changelog = "https://github.com/OpenADMET/challenge-data-checker/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+parquet = ["pyarrow"]
+remote = ["huggingface_hub", "requests"]
+test = ["pytest", "pytest-cov"]
+dev = ["black", "ruff", "mypy", "pydoclint"]
+
+[project.scripts]
+challenge-data-checker = "challenge_data_checker.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+
+[tool.pydoclint]
+style = "google"
+arg-type-hints-in-docstring = false
+check-return-types = false
+check-yield-types = false
