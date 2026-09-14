@@ -83,7 +83,10 @@ report_format = "json"               # default "json"; also accepts "txt"
   single training/test set respectively.
 - `columns.smiles_column`: resolved per file — exact match first, then
   case-insensitive, then a unique alias match (`smiles`, `smi`, `structure`,
-  `canonical_smiles`, `molecule`, `mol`).
+  `canonical_smiles`, `molecule`, `mol`). Falling back to an alias match logs
+  a warning and is recorded per file under `config.resolved_smiles_columns`
+  in the report, since it means a different column than configured is being
+  audited.
 - `columns.identifier_columns`: optional. A column missing from one file logs
   a warning and is simply skipped for that file's rows, without crashing.
 - `settings.max_train_test_similarity`: pairs with Tanimoto similarity **>=**

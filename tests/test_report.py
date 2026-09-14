@@ -66,6 +66,31 @@ def test_build_report_contains_expected_top_level_keys(tmp_path):
     assert report["config"]["report_format"] == "json"
 
 
+def test_build_report_records_resolved_smiles_columns(tmp_path):
+    config = make_config(tmp_path)
+
+    report = build_report(
+        config,
+        [],
+        [],
+        [],
+        {"train": {"train.csv": "canonical_smiles"}, "test": {"test.csv": "SMILES"}},
+    )
+
+    assert report["config"]["resolved_smiles_columns"] == {
+        "train": {"train.csv": "canonical_smiles"},
+        "test": {"test.csv": "SMILES"},
+    }
+
+
+def test_build_report_resolved_smiles_columns_defaults_to_empty(tmp_path):
+    config = make_config(tmp_path)
+
+    report = build_report(config, [], [], [])
+
+    assert report["config"]["resolved_smiles_columns"] == {"train": {}, "test": {}}
+
+
 def test_build_report_generated_at_is_a_valid_recent_timestamp(tmp_path):
     config = make_config(tmp_path)
     before = datetime.now().astimezone().replace(microsecond=0)

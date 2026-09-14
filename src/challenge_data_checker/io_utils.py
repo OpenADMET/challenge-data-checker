@@ -83,7 +83,9 @@ def describe_source(source: DataSource, index: int) -> str:
     return str(source)
 
 
-def resolve_smiles_column(columns: list[str], configured_name: str) -> str:
+def resolve_smiles_column(
+    columns: list[str], configured_name: str, source_label: str = "<unknown source>"
+) -> str:
     """Resolve the SMILES column name, falling back to case-insensitive/alias matching.
 
     Resolution order:
@@ -91,9 +93,15 @@ def resolve_smiles_column(columns: list[str], configured_name: str) -> str:
         2. Case-insensitive match to ``configured_name``.
         3. A unique column whose lowercased name is in ``SMILES_COLUMN_ALIASES``.
 
+    Falling back to an alias match (step 3) is logged as a warning, since it
+    means the configured column name wasn't found at all and a different
+    column is being audited in its place.
+
     Args:
         columns: Column names available in the loaded DataFrame.
         configured_name: The ``smiles_column`` value from the config.
+        source_label: Label identifying the source, used only in the warning
+            message logged on alias fallback.
 
     Returns:
         The resolved column name, exactly as it appears in ``columns``.
@@ -122,7 +130,15 @@ def resolve_smiles_column(columns: list[str], configured_name: str) -> str:
 
     alias_candidates = [col for col in columns if col.lower() in SMILES_COLUMN_ALIASES]
     if len(alias_candidates) == 1:
-        return alias_candidates[0]
+        resolved = alias_candidates[0]
+        logger.warning(
+            "SMILES column '%s' not found in %s; falling back to alias match '%s'. "
+            "Set 'smiles_column' explicitly to silence this warning if that's intended.",
+            configured_name,
+            source_label,
+            resolved,
+        )
+        return resolved
 
     if len(alias_candidates) > 1:
         raise ColumnResolutionError(
@@ -170,7 +186,7 @@ def check_identifier_columns(
 
 def load_pool(
     sources: Sequence[DataSource], smiles_column: str, identifier_columns: list[str]
-) -> tuple[pd.DataFrame, list[str]]:
+) -> tuple[pd.DataFrame, list[str], dict[str, str]]:
     """Load and concatenate a list of data sources into a single pool.
 
     Each source's SMILES column is independently resolved (exact/case-insensitive/
@@ -190,12 +206,16 @@ def load_pool(
         identifier_columns: Identifier column names from the config.
 
     Returns:
-        A tuple of the pooled DataFrame and the list of identifier columns
-        present in at least one of the sources (used for later checks).
+        A tuple of the pooled DataFrame, the list of identifier columns
+        present in at least one of the sources (used for later checks), and
+        a mapping of source label to the SMILES column actually resolved for
+        that source (so the report can record it even when it silently
+        differs from ``smiles_column``).
 
     """
     frames = []
     identifier_columns_seen: list[str] = []
+    resolved_smiles_columns: dict[str, str] = {}
     for i, source in enumerate(sources):
         if isinstance(source, pd.DataFrame):
             df = source.copy()
@@ -207,7 +227,8 @@ def load_pool(
             )
             df = load_table(local_path)
         label = describe_source(source, i)
-        resolved_smiles_col = resolve_smiles_column(list(df.columns), smiles_column)
+        resolved_smiles_col = resolve_smiles_column(list(df.columns), smiles_column, label)
+        resolved_smiles_columns[label] = resolved_smiles_col
         df = df.rename(columns={resolved_smiles_col: RESOLVED_SMILES_COL})
         present = check_identifier_columns(list(df.columns), identifier_columns, label)
         for col in present:
@@ -217,4 +238,4 @@ def load_pool(
         df[ROW_INDEX_COL] = df.index
         frames.append(df)
     pooled = pd.concat(frames, ignore_index=True)
-    return pooled, identifier_columns_seen
+    return pooled, identifier_columns_seen, resolved_smiles_columns

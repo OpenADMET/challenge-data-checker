@@ -25,10 +25,10 @@ def run_audit(config: Config, *, save: bool = True, print_report: bool = True) -
         ``report.build_report``.
 
     """
-    train_df, train_identifier_cols = load_pool(
+    train_df, train_identifier_cols, train_smiles_cols = load_pool(
         config.paths.train_files, config.columns.smiles_column, config.columns.identifier_columns
     )
-    test_df, test_identifier_cols = load_pool(
+    test_df, test_identifier_cols, test_smiles_cols = load_pool(
         config.paths.test_files, config.columns.smiles_column, config.columns.identifier_columns
     )
     # A column may be entirely absent from one pool's files (e.g. only present in
@@ -46,7 +46,10 @@ def run_audit(config: Config, *, save: bool = True, print_report: bool = True) -
     train_records = process_pool(train_df, "train", train_identifier_cols, processor)
     test_records = process_pool(test_df, "test", test_identifier_cols, processor)
 
-    report = build_report(config, train_records, test_records, identifier_columns)
+    resolved_smiles_columns = {"train": train_smiles_cols, "test": test_smiles_cols}
+    report = build_report(
+        config, train_records, test_records, identifier_columns, resolved_smiles_columns
+    )
 
     if save and config.paths.report_output is not None:
         save_report(report, config.paths.report_output, config.settings.report_format)

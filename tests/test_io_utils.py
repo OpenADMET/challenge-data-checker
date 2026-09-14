@@ -26,6 +26,21 @@ def test_resolve_smiles_column_alias_fallback():
     assert resolve_smiles_column(["structure", "value"], "SMILES") == "structure"
 
 
+def test_resolve_smiles_column_alias_fallback_warns(caplog):
+    with caplog.at_level(logging.WARNING):
+        resolved = resolve_smiles_column(["structure", "value"], "SMILES", "file.csv")
+    assert resolved == "structure"
+    assert "SMILES" in caplog.text
+    assert "structure" in caplog.text
+    assert "file.csv" in caplog.text
+
+
+def test_resolve_smiles_column_case_insensitive_does_not_warn(caplog):
+    with caplog.at_level(logging.WARNING):
+        resolve_smiles_column(["smiles", "value"], "SMILES", "file.csv")
+    assert caplog.text == ""
+
+
 def test_resolve_smiles_column_no_match_raises():
     with pytest.raises(ColumnResolutionError, match="Could not find"):
         resolve_smiles_column(["foo", "bar"], "SMILES")
@@ -52,12 +67,27 @@ def test_load_pool_renames_smiles_and_tags_provenance(tmp_path):
     pd.DataFrame({"SMILES": ["CCO"], "compound_id": ["C1"]}).to_csv(file_a, index=False)
     pd.DataFrame({"structure": ["CCN"], "compound_id": ["C2"]}).to_csv(file_b, index=False)
 
-    pooled, identifier_cols = load_pool([str(file_a), str(file_b)], "SMILES", ["compound_id"])
+    pooled, identifier_cols, resolved_smiles_cols = load_pool(
+        [str(file_a), str(file_b)], "SMILES", ["compound_id"]
+    )
 
     assert list(pooled[RESOLVED_SMILES_COL]) == ["CCO", "CCN"]
     assert identifier_cols == ["compound_id"]
     assert list(pooled[SOURCE_FILE_COL]) == [str(file_a), str(file_b)]
     assert list(pooled[ROW_INDEX_COL]) == [0, 0]
+    assert resolved_smiles_cols == {str(file_a): "SMILES", str(file_b): "structure"}
+
+
+def test_load_pool_warns_on_alias_fallback(tmp_path, caplog):
+    file_a = tmp_path / "a.csv"
+    pd.DataFrame({"canonical_smiles": ["CCO"]}).to_csv(file_a, index=False)
+
+    with caplog.at_level(logging.WARNING):
+        load_pool([str(file_a)], "SMILES", [])
+
+    assert "SMILES" in caplog.text
+    assert "canonical_smiles" in caplog.text
+    assert str(file_a) in caplog.text
 
 
 def test_load_pool_resolves_remote_url_source(tmp_path, monkeypatch):
@@ -70,10 +100,11 @@ def test_load_pool_resolves_remote_url_source(tmp_path, monkeypatch):
         lambda source: downloaded_file,
     )
 
-    pooled, _ = load_pool([url], "SMILES", [])
+    pooled, _, resolved_smiles_cols = load_pool([url], "SMILES", [])
 
     assert list(pooled[RESOLVED_SMILES_COL]) == ["CCO"]
     assert list(pooled[SOURCE_FILE_COL]) == [url]
+    assert resolved_smiles_cols == {url: "SMILES"}
 
 
 def test_load_pool_missing_identifier_in_one_file_does_not_crash(tmp_path, caplog):
@@ -83,7 +114,9 @@ def test_load_pool_missing_identifier_in_one_file_does_not_crash(tmp_path, caplo
     pd.DataFrame({"SMILES": ["CCN"]}).to_csv(file_b, index=False)
 
     with caplog.at_level(logging.WARNING):
-        pooled, identifier_cols = load_pool([str(file_a), str(file_b)], "SMILES", ["compound_id"])
+        pooled, identifier_cols, _ = load_pool(
+            [str(file_a), str(file_b)], "SMILES", ["compound_id"]
+        )
 
     assert identifier_cols == ["compound_id"]
     assert pooled["compound_id"].isna().sum() == 1

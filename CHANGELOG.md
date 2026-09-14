@@ -4,6 +4,16 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); tagged releases use
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.1] - 2026-09-14
+
+### Fixed
+
+- The SMILES column can no longer silently resolve to a different column
+  than configured: falling back to an alias match (`smiles`, `smi`,
+  `structure`, `canonical_smiles`, `molecule`, `mol`) now logs a warning and
+  the resolved column is recorded per source file under
+  `config.resolved_smiles_columns` in the report.
+
 ## [0.3.0] - 2026-08-28
 
 ### Added

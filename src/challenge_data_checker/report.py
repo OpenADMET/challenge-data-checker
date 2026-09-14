@@ -69,6 +69,7 @@ def build_report(
     train_records: list[MoleculeRecord],
     test_records: list[MoleculeRecord],
     identifier_columns: list[str],
+    resolved_smiles_columns: dict[str, dict[str, str]] | None = None,
 ) -> dict:
     """Run all checks and assemble the full JSON-serialisable audit report.
 
@@ -77,12 +78,18 @@ def build_report(
         train_records: Processed records from the training pool.
         test_records: Processed records from the test pool.
         identifier_columns: Identifier columns present in at least one pool.
+        resolved_smiles_columns: The SMILES column actually resolved for each
+            source, as ``{"train": {source_label: column, ...}, "test": {...}}``
+            (see ``io_utils.load_pool``). Recorded in the report so it's
+            self-documenting even when the resolved column silently differs
+            from ``config.columns.smiles_column``. Defaults to empty mappings.
 
     Returns:
         The full report dict, containing the echoed config, a summary of
         counts, and the detailed findings from every check.
 
     """
+    resolved_smiles_columns = resolved_smiles_columns or {"train": {}, "test": {}}
     generated_at = datetime.now().astimezone().isoformat(timespec="seconds")
     all_records = train_records + test_records
 
@@ -147,6 +154,7 @@ def build_report(
             "train_files": [describe_source(s, i) for i, s in enumerate(config.paths.train_files)],
             "test_files": [describe_source(s, i) for i, s in enumerate(config.paths.test_files)],
             "smiles_column": config.columns.smiles_column,
+            "resolved_smiles_columns": resolved_smiles_columns,
             "identifier_columns": identifier_columns,
             "tautomer_standardisation": config.settings.tautomer_standardisation,
             "max_train_test_similarity": config.settings.max_train_test_similarity,
