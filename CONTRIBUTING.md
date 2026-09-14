@@ -54,6 +54,15 @@ If AI tools contributed materially to a PR, that's fine and you don't need to fl
   pydoclint src
   ```
 
+  > If `mypy` fails with `rdkit-stubs/.../*.pyi: error: Parameter without a
+  > default follows parameter with a default  [syntax]`, that's a known bug
+  > in RDKit's bundled, auto-generated stubs (rdkit/rdkit#8339, #7554,
+  > #8673), not your code. Remove the broken stub package and re-run:
+  >
+  > ```bash
+  > python -c "import os, shutil, rdkit; sp = os.path.dirname(os.path.dirname(rdkit.__file__)); shutil.rmtree(os.path.join(sp, 'rdkit-stubs'), ignore_errors=True)"
+  > ```
+
 - **Docs:** update `README.md` when behaviour, configuration options, or the Python API change.
 
 ## Opening a pull request

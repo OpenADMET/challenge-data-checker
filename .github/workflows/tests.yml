@@ -33,6 +33,17 @@ jobs:
       - name: Install package
         run: pip install -e ".[parquet,test,remote]"
 
+      - name: Work around broken RDKit stub package
+        # RDKit bundles auto-generated .pyi stubs (rdkit-stubs) that
+        # periodically contain invalid signatures (e.g. a parameter without
+        # a default following one with a default), which makes mypy abort
+        # with a syntax error before it can check anything. This is a
+        # long-standing, unresolved upstream issue that recurs in different
+        # files across releases (see rdkit/rdkit#8339, #7554, #8673, #7378).
+        # Since rdkit is otherwise untyped for mypy (ignore_missing_imports),
+        # dropping the broken bundled stubs is safe and unblocks CI.
+        run: python -c "import os, shutil, rdkit; sp = os.path.dirname(os.path.dirname(rdkit.__file__)); shutil.rmtree(os.path.join(sp, 'rdkit-stubs'), ignore_errors=True)"
+
       - name: Lint (ruff)
         run: ruff check src tests
 
