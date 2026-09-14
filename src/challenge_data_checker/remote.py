@@ -18,13 +18,15 @@ class RemoteSourceError(ValueError):
 def is_remote_source(source: str) -> bool:
     """Check whether a data source string is a URL rather than a local path.
 
-    Args:
-        source: A train/test data source string, as given in a config or
-            passed to the Python API.
+    Parameters
+    ----------
+    source
+        A train/test data source string, as given in a config or passed
+        to the Python API.
 
-    Returns:
-        ``True`` if ``source`` starts with ``http://`` or ``https://``.
-
+    Returns
+    -------
+    ``True`` if ``source`` starts with ``http://`` or ``https://``.
     """
     return source.startswith(("http://", "https://"))
 
@@ -36,13 +38,15 @@ def parse_hf_hub_url(url: str) -> tuple[str, str, str] | None:
     ``https://huggingface.co/datasets/<namespace>/<name>/resolve/<revision>/<path>``
     (or the equivalent ``/blob/`` form used by the "Files" tab in the Hub UI).
 
-    Args:
-        url: The URL to parse.
+    Parameters
+    ----------
+    url
+        The URL to parse.
 
-    Returns:
-        A ``(repo_id, revision, path)`` tuple, or ``None`` if ``url`` isn't a
-        recognised HuggingFace Hub dataset-file URL.
-
+    Returns
+    -------
+    A ``(repo_id, revision, path)`` tuple, or ``None`` if ``url`` isn't a
+    recognised HuggingFace Hub dataset-file URL.
     """
     match = HF_HUB_URL_RE.match(url)
     if match is None:
@@ -53,19 +57,26 @@ def parse_hf_hub_url(url: str) -> tuple[str, str, str] | None:
 def _download_from_hf_hub(repo_id: str, revision: str, path: str, url: str) -> Path:
     """Download a file from HuggingFace Hub via ``huggingface_hub``.
 
-    Args:
-        repo_id: The dataset repo id, e.g. ``"namespace/name"``.
-        revision: The branch, tag, or commit to download from.
-        path: The file's path within the repo.
-        url: The original URL, used only in error messages.
+    Parameters
+    ----------
+    repo_id
+        The dataset repo id, e.g. ``"namespace/name"``.
+    revision
+        The branch, tag, or commit to download from.
+    path
+        The file's path within the repo.
+    url
+        The original URL, used only in error messages.
 
-    Returns:
-        The local path of the downloaded (and cached) file.
+    Returns
+    -------
+    The local path of the downloaded (and cached) file.
 
-    Raises:
-        RemoteSourceError: If ``huggingface_hub`` isn't installed, the file
-            or repo doesn't exist, or access is denied.
-
+    Raises
+    ------
+    RemoteSourceError
+        If ``huggingface_hub`` isn't installed, the file or repo doesn't
+        exist, or access is denied.
     """
     try:
         from huggingface_hub import hf_hub_download
@@ -94,19 +105,23 @@ def _download_from_hf_hub(repo_id: str, revision: str, path: str, url: str) -> P
 def _download_generic_url(url: str) -> Path:
     """Download a plain HTTP(S) URL to a local temporary file.
 
-    Args:
-        url: The URL to download.
+    Parameters
+    ----------
+    url
+        The URL to download.
 
-    Returns:
-        The path of a local temporary file holding the downloaded content,
-        with the same file extension as the URL's path (so ``.csv``/
-        ``.parquet`` detection downstream still works even with a query
-        string, e.g. a GitHub raw URL with a ``?token=...`` suffix).
+    Returns
+    -------
+    The path of a local temporary file holding the downloaded content,
+    with the same file extension as the URL's path (so ``.csv``/
+    ``.parquet`` detection downstream still works even with a query
+    string, e.g. a GitHub raw URL with a ``?token=...`` suffix).
 
-    Raises:
-        RemoteSourceError: If ``requests`` isn't installed, the request
-            fails (HTTP error status or network error).
-
+    Raises
+    ------
+    RemoteSourceError
+        If ``requests`` isn't installed, the request fails (HTTP error
+        status or network error).
     """
     try:
         import requests
@@ -148,12 +163,14 @@ def resolve_remote_source(url: str) -> Path:
     URL is downloaded directly with a plain HTTP GET, to a fresh temporary
     file every time.
 
-    Args:
-        url: The URL to download.
+    Parameters
+    ----------
+    url
+        The URL to download.
 
-    Returns:
-        The local path of the downloaded file.
-
+    Returns
+    -------
+    The local path of the downloaded file.
     """
     hf_match = parse_hf_hub_url(url)
     if hf_match is not None:

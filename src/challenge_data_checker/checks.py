@@ -13,12 +13,14 @@ KeyFunc = Callable[[MoleculeRecord], str | None]
 def unparseable_entries(records: list[MoleculeRecord]) -> list[dict]:
     """Collect rows whose SMILES could not be parsed or processed.
 
-    Args:
-        records: The records to inspect.
+    Parameters
+    ----------
+    records
+        The records to inspect.
 
-    Returns:
-        A list of location/error dicts, one per unparseable record.
-
+    Returns
+    -------
+    A list of location/error dicts, one per unparseable record.
     """
     return [{**r.location(), "error": r.parse_error} for r in records if not r.is_parsed]
 
@@ -26,14 +28,17 @@ def unparseable_entries(records: list[MoleculeRecord]) -> list[dict]:
 def _index_by(records: list[MoleculeRecord], key_func: KeyFunc) -> dict[str, list[MoleculeRecord]]:
     """Group records by a derived key, dropping records with no key.
 
-    Args:
-        records: The records to index.
-        key_func: A function mapping a record to its grouping key, or
-            ``None`` to exclude the record.
+    Parameters
+    ----------
+    records
+        The records to index.
+    key_func
+        A function mapping a record to its grouping key, or ``None`` to
+        exclude the record.
 
-    Returns:
-        A mapping of key to the list of records sharing that key.
-
+    Returns
+    -------
+    A mapping of key to the list of records sharing that key.
     """
     index: dict[str, list[MoleculeRecord]] = defaultdict(list)
     for r in records:
@@ -46,11 +51,11 @@ def _index_by(records: list[MoleculeRecord], key_func: KeyFunc) -> dict[str, lis
 def _representation_key_funcs() -> dict[str, KeyFunc]:
     """Build the key functions for each chemical representation.
 
-    Returns:
-        A mapping of representation name (``raw_smiles``, ``canonical_smiles``,
-        ``inchikey``) to a function extracting that representation's value
-        from a record.
-
+    Returns
+    -------
+    A mapping of representation name (``raw_smiles``, ``canonical_smiles``,
+    ``inchikey``) to a function extracting that representation's value
+    from a record.
     """
     return {
         "raw_smiles": lambda r: r.raw_smiles if r.raw_smiles else None,
@@ -62,12 +67,14 @@ def _representation_key_funcs() -> dict[str, KeyFunc]:
 def _identifier_key_func(col: str) -> KeyFunc:
     """Build a key function extracting a given identifier column's value.
 
-    Args:
-        col: The identifier column name to extract.
+    Parameters
+    ----------
+    col
+        The identifier column name to extract.
 
-    Returns:
-        A function mapping a record to its value for ``col``.
-
+    Returns
+    -------
+    A function mapping a record to its value for ``col``.
     """
 
     def key_func(r: MoleculeRecord) -> str | None:
@@ -81,14 +88,17 @@ def train_test_leakage(
 ) -> dict[str, list[dict]]:
     """Find raw SMILES / canonical SMILES / InChIKey values present in both pools.
 
-    Args:
-        train_records: Processed records from the training pool.
-        test_records: Processed records from the test pool.
+    Parameters
+    ----------
+    train_records
+        Processed records from the training pool.
+    test_records
+        Processed records from the test pool.
 
-    Returns:
-        A mapping of representation name to a list of leakage findings, each
-        with the shared value and its train/test occurrences.
-
+    Returns
+    -------
+    A mapping of representation name to a list of leakage findings, each
+    with the shared value and its train/test occurrences.
     """
     result: dict[str, list[dict]] = {}
     for name, key_func in _representation_key_funcs().items():
@@ -113,15 +123,19 @@ def identifier_leakage(
 ) -> dict[str, list[dict]]:
     """Find identifier values (within the same column) present in both pools.
 
-    Args:
-        train_records: Processed records from the training pool.
-        test_records: Processed records from the test pool.
-        identifier_columns: Identifier column names to check.
+    Parameters
+    ----------
+    train_records
+        Processed records from the training pool.
+    test_records
+        Processed records from the test pool.
+    identifier_columns
+        Identifier column names to check.
 
-    Returns:
-        A mapping of identifier column name to a list of leakage findings,
-        each with the shared identifier value and its train/test occurrences.
-
+    Returns
+    -------
+    A mapping of identifier column name to a list of leakage findings,
+    each with the shared identifier value and its train/test occurrences.
     """
     result: dict[str, list[dict]] = {}
     for col in identifier_columns:
@@ -145,17 +159,19 @@ def internal_duplicates(
 ) -> dict[str, Any]:
     """Find values that appear more than once within a single pool.
 
-    Args:
-        records: Processed records from a single pool (train-only or
-            test-only).
-        identifier_columns: Identifier column names to check.
+    Parameters
+    ----------
+    records
+        Processed records from a single pool (train-only or test-only).
+    identifier_columns
+        Identifier column names to check.
 
-    Returns:
-        A mapping with one entry per representation (``raw_smiles``,
-        ``canonical_smiles``, ``inchikey``) plus an ``"identifiers"`` entry
-        mapping each identifier column to its own duplicate findings. Each
-        finding lists the duplicated value and all of its occurrences.
-
+    Returns
+    -------
+    A mapping with one entry per representation (``raw_smiles``,
+    ``canonical_smiles``, ``inchikey``) plus an ``"identifiers"`` entry
+    mapping each identifier column to its own duplicate findings. Each
+    finding lists the duplicated value and all of its occurrences.
     """
     result: dict[str, Any] = {}
     for name, key_func in _representation_key_funcs().items():
@@ -192,16 +208,18 @@ def identifier_namespace_issues(
           SMILES AND InChIKey) is given 2+ distinct identifier strings within
           that column.
 
-    Args:
-        all_records: Processed records from both the training and test
-            pools, combined.
-        identifier_columns: Identifier column names to check.
+    Parameters
+    ----------
+    all_records
+        Processed records from both the training and test pools, combined.
+    identifier_columns
+        Identifier column names to check.
 
-    Returns:
-        A mapping of identifier column name to a dict with
-        ``one_id_multiple_structures`` and ``one_structure_multiple_ids``
-        finding lists.
-
+    Returns
+    -------
+    A mapping of identifier column name to a dict with
+    ``one_id_multiple_structures`` and ``one_structure_multiple_ids``
+    finding lists.
     """
     result: dict[str, dict[str, list[dict]]] = {}
     for col in identifier_columns:
@@ -277,15 +295,19 @@ def tanimoto_leakage(
     exact leakage elsewhere). Uses RDKit's ``BulkTanimotoSimilarity`` to avoid
     nested Python loops.
 
-    Args:
-        train_records: Processed records from the training pool.
-        test_records: Processed records from the test pool.
-        threshold: Minimum Tanimoto similarity (inclusive) to flag a pair.
+    Parameters
+    ----------
+    train_records
+        Processed records from the training pool.
+    test_records
+        Processed records from the test pool.
+    threshold
+        Minimum Tanimoto similarity (inclusive) to flag a pair.
 
-    Returns:
-        A list of findings, each with the train/test locations and their
-        similarity, sorted by descending similarity.
-
+    Returns
+    -------
+    A list of findings, each with the train/test locations and their
+    similarity, sorted by descending similarity.
     """
     train_valid = [r for r in train_records if r.fingerprint is not None]
     test_valid = [r for r in test_records if r.fingerprint is not None]

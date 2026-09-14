@@ -38,16 +38,21 @@ class ColumnResolutionError(ValueError):
 def load_table(path: str | Path) -> pd.DataFrame:
     """Load a .csv or .parquet file into a DataFrame.
 
-    Args:
-        path: Path to a .csv or .parquet data file.
+    Parameters
+    ----------
+    path
+        Path to a .csv or .parquet data file.
 
-    Returns:
-        The loaded data as a DataFrame.
+    Returns
+    -------
+    The loaded data as a DataFrame.
 
-    Raises:
-        FileNotFoundError: If ``path`` does not exist.
-        ValueError: If ``path`` has an unsupported file extension.
-
+    Raises
+    ------
+    FileNotFoundError
+        If ``path`` does not exist.
+    ValueError
+        If ``path`` has an unsupported file extension.
     """
     path = Path(path)
     if not path.is_file():
@@ -68,15 +73,18 @@ def describe_source(source: DataSource, index: int) -> str:
     so a finding's location and the config section refer to the source the
     same way.
 
-    Args:
-        source: A file path, or an in-memory DataFrame.
-        index: The source's position in its train/test list, used to
-            distinguish multiple in-memory DataFrames from one another.
+    Parameters
+    ----------
+    source
+        A file path, or an in-memory DataFrame.
+    index
+        The source's position in its train/test list, used to distinguish
+        multiple in-memory DataFrames from one another.
 
-    Returns:
-        The path as a string, or ``"<in-memory dataframe #N (R rows)>"`` for
-        a DataFrame.
-
+    Returns
+    -------
+    The path as a string, or ``"<in-memory dataframe #N (R rows)>"`` for
+    a DataFrame.
     """
     if isinstance(source, pd.DataFrame):
         return f"<in-memory dataframe #{index} ({len(source)} rows)>"
@@ -97,19 +105,25 @@ def resolve_smiles_column(
     means the configured column name wasn't found at all and a different
     column is being audited in its place.
 
-    Args:
-        columns: Column names available in the loaded DataFrame.
-        configured_name: The ``smiles_column`` value from the config.
-        source_label: Label identifying the source, used only in the warning
-            message logged on alias fallback.
+    Parameters
+    ----------
+    columns
+        Column names available in the loaded DataFrame.
+    configured_name
+        The ``smiles_column`` value from the config.
+    source_label
+        Label identifying the source, used only in the warning message
+        logged on alias fallback.
 
-    Returns:
-        The resolved column name, exactly as it appears in ``columns``.
+    Returns
+    -------
+    The resolved column name, exactly as it appears in ``columns``.
 
-    Raises:
-        ColumnResolutionError: If no single column can be unambiguously
-            resolved as the SMILES column.
-
+    Raises
+    ------
+    ColumnResolutionError
+        If no single column can be unambiguously resolved as the SMILES
+        column.
     """
     if configured_name in columns:
         return configured_name
@@ -160,15 +174,18 @@ def check_identifier_columns(
     Logs a warning (does not raise) for any configured identifier column
     missing from this particular file.
 
-    Args:
-        columns: Column names available in the loaded DataFrame.
-        identifier_columns: Identifier column names from the config.
-        file_path: Path of the file being checked, used only in the warning
-            message.
+    Parameters
+    ----------
+    columns
+        Column names available in the loaded DataFrame.
+    identifier_columns
+        Identifier column names from the config.
+    file_path
+        Path of the file being checked, used only in the warning message.
 
-    Returns:
-        The subset of ``identifier_columns`` that are present in ``columns``.
-
+    Returns
+    -------
+    The subset of ``identifier_columns`` that are present in ``columns``.
     """
     present = []
     for col in identifier_columns:
@@ -197,21 +214,24 @@ def load_pool(
     warning and simply left absent (pandas fills them with NaN after
     concatenation).
 
-    Args:
-        sources: Paths to .csv/.parquet files, URLs to remote .csv/.parquet
-            files (HuggingFace Hub or plain HTTP(S)), and/or already-loaded
-            DataFrames to load (if needed) and pool together.
-        smiles_column: The configured SMILES column name to resolve in each
-            source.
-        identifier_columns: Identifier column names from the config.
+    Parameters
+    ----------
+    sources
+        Paths to .csv/.parquet files, URLs to remote .csv/.parquet files
+        (HuggingFace Hub or plain HTTP(S)), and/or already-loaded
+        DataFrames to load (if needed) and pool together.
+    smiles_column
+        The configured SMILES column name to resolve in each source.
+    identifier_columns
+        Identifier column names from the config.
 
-    Returns:
-        A tuple of the pooled DataFrame, the list of identifier columns
-        present in at least one of the sources (used for later checks), and
-        a mapping of source label to the SMILES column actually resolved for
-        that source (so the report can record it even when it silently
-        differs from ``smiles_column``).
-
+    Returns
+    -------
+    A tuple of the pooled DataFrame, the list of identifier columns
+    present in at least one of the sources (used for later checks), and
+    a mapping of source label to the SMILES column actually resolved for
+    that source (so the report can record it even when it silently
+    differs from ``smiles_column``).
     """
     frames = []
     identifier_columns_seen: list[str] = []

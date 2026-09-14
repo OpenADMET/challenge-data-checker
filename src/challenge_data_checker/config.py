@@ -19,17 +19,19 @@ VALID_REPORT_FORMATS = {"json", "txt"}
 class PathsConfig:
     """Train/test data sources and report destination.
 
-    Attributes:
-        train_files: Training data sources: paths to .csv/.parquet files,
-            URLs to remote .csv/.parquet files (HuggingFace Hub or plain
-            HTTP(S)), and/or already-loaded DataFrames (the latter only when
-            built directly via the Python API, never from a TOML config).
-        test_files: Test data sources, in the same shapes as ``train_files``.
-        report_output: Path the audit report will be written to, in the
-            format given by ``settings.report_format``, or ``None`` to skip
-            writing a report file (Python API only; a TOML config always
-            requires this).
-
+    Attributes
+    ----------
+    train_files
+        Training data sources: paths to .csv/.parquet files, URLs to
+        remote .csv/.parquet files (HuggingFace Hub or plain HTTP(S)),
+        and/or already-loaded DataFrames (the latter only when built
+        directly via the Python API, never from a TOML config).
+    test_files
+        Test data sources, in the same shapes as ``train_files``.
+    report_output
+        Path the audit report will be written to, in the format given by
+        ``settings.report_format``, or ``None`` to skip writing a report
+        file (Python API only; a TOML config always requires this).
     """
 
     train_files: Sequence[DataSource]
@@ -41,10 +43,12 @@ class PathsConfig:
 class ColumnsConfig:
     """Column configuration declared in the ``[columns]`` section of the config.
 
-    Attributes:
-        smiles_column: Name of the column containing SMILES strings.
-        identifier_columns: Names of columns holding compound identifiers.
-
+    Attributes
+    ----------
+    smiles_column
+        Name of the column containing SMILES strings.
+    identifier_columns
+        Names of columns holding compound identifiers.
     """
 
     smiles_column: str
@@ -55,18 +59,22 @@ class ColumnsConfig:
 class SettingsConfig:
     """Optional settings declared in the ``[settings]`` section of the config.
 
-    Attributes:
-        tautomer_standardisation: Whether to canonicalise tautomers before
-            comparing molecules.
-        max_train_test_similarity: Tanimoto similarity threshold (0.0-1.0) at
-            or above which a train/test pair is flagged as possible leakage.
-        fp_radius: Morgan fingerprint radius.
-        fp_n_bits: Morgan fingerprint bit-vector length.
-        report_format: Output format for the audit report, ``"json"`` or
-            ``"txt"``. If not set explicitly in the config, it is inferred
-            from ``paths.report_output``'s file extension: ``.txt`` implies
-            ``"txt"``, anything else implies ``"json"``.
-
+    Attributes
+    ----------
+    tautomer_standardisation
+        Whether to canonicalise tautomers before comparing molecules.
+    max_train_test_similarity
+        Tanimoto similarity threshold (0.0-1.0) at or above which a
+        train/test pair is flagged as possible leakage.
+    fp_radius
+        Morgan fingerprint radius.
+    fp_n_bits
+        Morgan fingerprint bit-vector length.
+    report_format
+        Output format for the audit report, ``"json"`` or ``"txt"``. If
+        not set explicitly in the config, it is inferred from
+        ``paths.report_output``'s file extension: ``.txt`` implies
+        ``"txt"``, anything else implies ``"json"``.
     """
 
     tautomer_standardisation: bool = False
@@ -80,12 +88,16 @@ class SettingsConfig:
 class Config:
     """Fully parsed and validated challenge-data-checker configuration.
 
-    Attributes:
-        paths: Input/output file paths.
-        columns: SMILES and identifier column configuration.
-        settings: Optional chemistry/matching settings.
-        config_path: Path the configuration was loaded from.
-
+    Attributes
+    ----------
+    paths
+        Input/output file paths.
+    columns
+        SMILES and identifier column configuration.
+    settings
+        Optional chemistry/matching settings.
+    config_path
+        Path the configuration was loaded from.
     """
 
     paths: PathsConfig
@@ -97,16 +109,18 @@ class Config:
 def infer_report_format(explicit: str | None, report_output: str | Path | None) -> str:
     """Resolve the report format, inferring it from the output path when unset.
 
-    Args:
-        explicit: The user-specified ``report_format``, or ``None`` if not
-            set.
-        report_output: The path the report will be written to, or ``None``
-            if it won't be written to disk.
+    Parameters
+    ----------
+    explicit
+        The user-specified ``report_format``, or ``None`` if not set.
+    report_output
+        The path the report will be written to, or ``None`` if it won't
+        be written to disk.
 
-    Returns:
-        ``explicit`` (lowercased) if given; otherwise ``"txt"`` if
-        ``report_output`` ends in ``.txt``, otherwise ``"json"``.
-
+    Returns
+    -------
+    ``explicit`` (lowercased) if given; otherwise ``"txt"`` if
+    ``report_output`` ends in ``.txt``, otherwise ``"json"``.
     """
     if explicit is not None:
         return explicit.lower()
@@ -118,17 +132,23 @@ def infer_report_format(explicit: str | None, report_output: str | Path | None) 
 def _require(section: dict, key: str, section_name: str) -> object:
     """Fetch a required key from a parsed TOML section.
 
-    Args:
-        section: The parsed TOML section.
-        key: The key to look up within ``section``.
-        section_name: Name of the section, used only in error messages.
+    Parameters
+    ----------
+    section
+        The parsed TOML section.
+    key
+        The key to look up within ``section``.
+    section_name
+        Name of the section, used only in error messages.
 
-    Returns:
-        The value stored under ``key``.
+    Returns
+    -------
+    The value stored under ``key``.
 
-    Raises:
-        ConfigError: If ``key`` is not present in ``section``.
-
+    Raises
+    ------
+    ConfigError
+        If ``key`` is not present in ``section``.
     """
     if key not in section:
         raise ConfigError(f"Missing required key '{key}' in [{section_name}] section.")
@@ -138,17 +158,23 @@ def _require(section: dict, key: str, section_name: str) -> object:
 def _require_str_list(section: dict, key: str, section_name: str) -> list[str]:
     """Fetch and validate a required, non-empty list-of-strings key.
 
-    Args:
-        section: The parsed TOML section.
-        key: The key to look up within ``section``.
-        section_name: Name of the section, used only in error messages.
+    Parameters
+    ----------
+    section
+        The parsed TOML section.
+    key
+        The key to look up within ``section``.
+    section_name
+        Name of the section, used only in error messages.
 
-    Returns:
-        The list of strings stored under ``key``.
+    Returns
+    -------
+    The list of strings stored under ``key``.
 
-    Raises:
-        ConfigError: If the key is missing, not a list of strings, or empty.
-
+    Raises
+    ------
+    ConfigError
+        If the key is missing, not a list of strings, or empty.
     """
     value = _require(section, key, section_name)
     if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
@@ -161,16 +187,20 @@ def _require_str_list(section: dict, key: str, section_name: str) -> list[str]:
 def load_config(config_path: str | Path) -> Config:
     """Load and validate a challenge-data-checker TOML configuration file.
 
-    Args:
-        config_path: Path to the TOML configuration file.
+    Parameters
+    ----------
+    config_path
+        Path to the TOML configuration file.
 
-    Returns:
-        The parsed and validated configuration.
+    Returns
+    -------
+    The parsed and validated configuration.
 
-    Raises:
-        ConfigError: If the file is missing, not valid TOML, missing a
-            required section or key, or contains an out-of-range setting.
-
+    Raises
+    ------
+    ConfigError
+        If the file is missing, not valid TOML, missing a required
+        section or key, or contains an out-of-range setting.
     """
     config_path = Path(config_path)
     if not config_path.is_file():

@@ -4,6 +4,13 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); tagged releases use
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.2] - 2026-09-15
+
+### Changed
+
+- All docstrings reformatted from Google to NumPy style, and `pydoclint`'s
+  configured style switched to match. No behaviour change.
+
 ## [0.3.1] - 2026-09-14
 
 ### Fixed

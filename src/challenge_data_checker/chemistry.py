@@ -26,14 +26,16 @@ RDLogger.DisableLog("rdApp.*")
 def parse_smiles(smiles: str) -> tuple[Chem.Mol | None, str | None]:
     """Parse a SMILES string.
 
-    Args:
-        smiles: The SMILES string to parse.
+    Parameters
+    ----------
+    smiles
+        The SMILES string to parse.
 
-    Returns:
-        A tuple of the parsed molecule and an error message. Exactly one of
-        the two is ``None``: the molecule if parsing succeeded, or the error
-        message if it failed.
-
+    Returns
+    -------
+    A tuple of the parsed molecule and an error message. Exactly one of
+    the two is ``None``: the molecule if parsing succeeded, or the error
+    message if it failed.
     """
     if not isinstance(smiles, str) or not smiles.strip():
         return None, "Empty or non-string SMILES value"
@@ -46,10 +48,11 @@ def parse_smiles(smiles: str) -> tuple[Chem.Mol | None, str | None]:
 class MoleculeProcessor:
     """Reusable RDKit helper for standardisation, canonicalisation, and fingerprinting.
 
-    Args:
-        settings: Chemistry settings controlling tautomer standardisation and
-            Morgan fingerprint generation.
-
+    Parameters
+    ----------
+    settings
+        Chemistry settings controlling tautomer standardisation and
+        Morgan fingerprint generation.
     """
 
     def __init__(self, settings: SettingsConfig) -> None:
@@ -66,14 +69,16 @@ class MoleculeProcessor:
     def standardise(self, mol: Chem.Mol) -> Chem.Mol:
         """Canonicalise the molecule's tautomeric form, if enabled.
 
-        Args:
-            mol: The molecule to standardise.
+        Parameters
+        ----------
+        mol
+            The molecule to standardise.
 
-        Returns:
-            The tautomer-canonicalised molecule if
-            ``settings.tautomer_standardisation`` is enabled, otherwise
-            ``mol`` unchanged.
-
+        Returns
+        -------
+        The tautomer-canonicalised molecule if
+        ``settings.tautomer_standardisation`` is enabled, otherwise ``mol``
+        unchanged.
         """
         if self._tautomer_enumerator is not None:
             return self._tautomer_enumerator.Canonicalize(mol)
@@ -82,24 +87,28 @@ class MoleculeProcessor:
     def canonical_smiles(self, mol: Chem.Mol) -> str:
         """Generate the RDKit canonical SMILES for a molecule.
 
-        Args:
-            mol: The molecule to canonicalise.
+        Parameters
+        ----------
+        mol
+            The molecule to canonicalise.
 
-        Returns:
-            The canonical SMILES string.
-
+        Returns
+        -------
+        The canonical SMILES string.
         """
         return Chem.MolToSmiles(mol, canonical=True)
 
     def inchikey(self, mol: Chem.Mol) -> str | None:
         """Generate the InChIKey for a molecule.
 
-        Args:
-            mol: The molecule to generate an InChIKey for.
+        Parameters
+        ----------
+        mol
+            The molecule to generate an InChIKey for.
 
-        Returns:
-            The InChIKey, or ``None`` if InChIKey generation failed.
-
+        Returns
+        -------
+        The InChIKey, or ``None`` if InChIKey generation failed.
         """
         key = rdinchi.MolToInchiKey(mol)
         return key or None
@@ -107,13 +116,15 @@ class MoleculeProcessor:
     def fingerprint(self, mol: Chem.Mol) -> Fingerprint:
         """Generate a stereo-blind Morgan fingerprint for a molecule.
 
-        Args:
-            mol: The molecule to fingerprint.
+        Parameters
+        ----------
+        mol
+            The molecule to fingerprint.
 
-        Returns:
-            The Morgan fingerprint bit vector, using the radius and bit
-            length from ``settings`` and ignoring stereochemistry.
-
+        Returns
+        -------
+        The Morgan fingerprint bit vector, using the radius and bit
+        length from ``settings`` and ignoring stereochemistry.
         """
         return self._fp_generator.GetFingerprint(mol)
 
@@ -132,17 +143,22 @@ class MoleculeProcessor:
         heuristics. Any failure at any stage is captured on the returned
         record's ``parse_error`` rather than raised.
 
-        Args:
-            pool: Which pool the row belongs to, ``"train"`` or ``"test"``.
-            source_file: Path of the file the row was loaded from.
-            row_index: Original row index within ``source_file``.
-            raw_smiles: The raw SMILES string as read from the input file.
-            identifiers: Mapping of identifier column name to its value for
-                this row.
+        Parameters
+        ----------
+        pool
+            Which pool the row belongs to, ``"train"`` or ``"test"``.
+        source_file
+            Path of the file the row was loaded from.
+        row_index
+            Original row index within ``source_file``.
+        raw_smiles
+            The raw SMILES string as read from the input file.
+        identifiers
+            Mapping of identifier column name to its value for this row.
 
-        Returns:
-            The fully populated MoleculeRecord for this row.
-
+        Returns
+        -------
+        The fully populated MoleculeRecord for this row.
         """
         record = MoleculeRecord(
             pool=pool,
@@ -185,16 +201,21 @@ def process_pool(
 ) -> list[MoleculeRecord]:
     """Process every row of a pooled DataFrame into MoleculeRecords.
 
-    Args:
-        df: A pooled DataFrame, as returned by ``io_utils.load_pool``.
-        pool: Which pool ``df`` represents, ``"train"`` or ``"test"``.
-        identifier_columns: Identifier column names to extract per row.
-        processor: The MoleculeProcessor to use for parsing/standardisation/
-            fingerprinting.
+    Parameters
+    ----------
+    df
+        A pooled DataFrame, as returned by ``io_utils.load_pool``.
+    pool
+        Which pool ``df`` represents, ``"train"`` or ``"test"``.
+    identifier_columns
+        Identifier column names to extract per row.
+    processor
+        The MoleculeProcessor to use for parsing/standardisation/
+        fingerprinting.
 
-    Returns:
-        One MoleculeRecord per row of ``df``.
-
+    Returns
+    -------
+    One MoleculeRecord per row of ``df``.
     """
     records = []
     for _, row in df.iterrows():

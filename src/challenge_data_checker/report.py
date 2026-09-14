@@ -25,13 +25,15 @@ from challenge_data_checker.models import MoleculeRecord
 def quality_flag_entries(records: list[MoleculeRecord]) -> dict[str, list[dict]]:
     """Collect quality-filter findings (mixtures, salts/metals, suspicious fragments).
 
-    Args:
-        records: Processed records from a single pool.
+    Parameters
+    ----------
+    records
+        Processed records from a single pool.
 
-    Returns:
-        A mapping of ``"mixtures"``, ``"salts_or_metal_complexes"``, and
-        ``"suspicious_fragments"`` to the list of matching record locations.
-
+    Returns
+    -------
+    A mapping of ``"mixtures"``, ``"salts_or_metal_complexes"``, and
+    ``"suspicious_fragments"`` to the list of matching record locations.
     """
     return {
         "mixtures": [r.location() for r in records if r.is_parsed and r.is_mixture],
@@ -47,14 +49,17 @@ def quality_flag_entries(records: list[MoleculeRecord]) -> dict[str, list[dict]]
 def _unique_leaked_locations(exact_leakage: dict[str, list[dict]], side: str) -> int:
     """Count the distinct rows involved in exact leakage findings on one side.
 
-    Args:
-        exact_leakage: The result of ``checks.train_test_leakage``.
-        side: Which side to count, ``"train"`` or ``"test"``.
+    Parameters
+    ----------
+    exact_leakage
+        The result of ``checks.train_test_leakage``.
+    side
+        Which side to count, ``"train"`` or ``"test"``.
 
-    Returns:
-        The number of distinct (pool, source_file, row_index) rows appearing
-        as a ``{side}_occurrences`` entry across all representations.
-
+    Returns
+    -------
+    The number of distinct (pool, source_file, row_index) rows appearing
+    as a ``{side}_occurrences`` entry across all representations.
     """
     seen = set()
     for entries in exact_leakage.values():
@@ -73,21 +78,27 @@ def build_report(
 ) -> dict:
     """Run all checks and assemble the full JSON-serialisable audit report.
 
-    Args:
-        config: The validated configuration used for this run.
-        train_records: Processed records from the training pool.
-        test_records: Processed records from the test pool.
-        identifier_columns: Identifier columns present in at least one pool.
-        resolved_smiles_columns: The SMILES column actually resolved for each
-            source, as ``{"train": {source_label: column, ...}, "test": {...}}``
-            (see ``io_utils.load_pool``). Recorded in the report so it's
-            self-documenting even when the resolved column silently differs
-            from ``config.columns.smiles_column``. Defaults to empty mappings.
+    Parameters
+    ----------
+    config
+        The validated configuration used for this run.
+    train_records
+        Processed records from the training pool.
+    test_records
+        Processed records from the test pool.
+    identifier_columns
+        Identifier columns present in at least one pool.
+    resolved_smiles_columns
+        The SMILES column actually resolved for each source, as
+        ``{"train": {source_label: column, ...}, "test": {...}}`` (see
+        ``io_utils.load_pool``). Recorded in the report so it's
+        self-documenting even when the resolved column silently differs
+        from ``config.columns.smiles_column``. Defaults to empty mappings.
 
-    Returns:
-        The full report dict, containing the echoed config, a summary of
-        counts, and the detailed findings from every check.
-
+    Returns
+    -------
+    The full report dict, containing the echoed config, a summary of
+    counts, and the detailed findings from every check.
     """
     resolved_smiles_columns = resolved_smiles_columns or {"train": {}, "test": {}}
     generated_at = datetime.now().astimezone().isoformat(timespec="seconds")
@@ -180,14 +191,20 @@ def save_report(report: dict, output_path: str | Path, report_format: str = "jso
 
     Creates any missing parent directories of ``output_path``.
 
-    Args:
-        report: The report dict, as returned by ``build_report``.
-        output_path: Path to write the report to.
-        report_format: Either ``"json"`` (machine-readable, full fidelity) or
-            ``"txt"`` (human-readable prose rendering of the same findings).
+    Parameters
+    ----------
+    report
+        The report dict, as returned by ``build_report``.
+    output_path
+        Path to write the report to.
+    report_format
+        Either ``"json"`` (machine-readable, full fidelity) or ``"txt"``
+        (human-readable prose rendering of the same findings).
 
-    Raises:
-        ValueError: If ``report_format`` is not ``"json"`` or ``"txt"``.
+    Raises
+    ------
+    ValueError
+        If ``report_format`` is not ``"json"`` or ``"txt"``.
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -203,12 +220,14 @@ def save_report(report: dict, output_path: str | Path, report_format: str = "jso
 def _fmt_counts(counts: dict[str, int]) -> str:
     """Format a mapping of counts as a compact ``key=value, ...`` string.
 
-    Args:
-        counts: The counts to format.
+    Parameters
+    ----------
+    counts
+        The counts to format.
 
-    Returns:
-        A comma-separated ``key=value`` string.
-
+    Returns
+    -------
+    A comma-separated ``key=value`` string.
     """
     return ", ".join(f"{k}={v}" for k, v in counts.items())
 
@@ -216,12 +235,15 @@ def _fmt_counts(counts: dict[str, int]) -> str:
 def _build_summary_lines(report: dict) -> list[str]:
     """Build the summary dashboard as a list of text lines.
 
-    Args:
-        report: The report dict, as returned by ``build_report``.
+    Parameters
+    ----------
+    report
+        The report dict, as returned by ``build_report``.
 
-    Returns:
-        The dashboard lines, banner included but with no trailing "written
-        to" line (callers add that themselves if relevant).
+    Returns
+    -------
+    The dashboard lines, banner included but with no trailing "written
+    to" line (callers add that themselves if relevant).
     """
     s = report["summary"]
     lines = [
@@ -282,11 +304,14 @@ def _build_summary_lines(report: dict) -> list[str]:
 def _count_style(count: int) -> str:
     """Pick a rich style for a finding count, green if zero and red otherwise.
 
-    Args:
-        count: The finding count to style.
+    Parameters
+    ----------
+    count
+        The finding count to style.
 
-    Returns:
-        ``"bold green"`` if ``count`` is zero, ``"bold red"`` otherwise.
+    Returns
+    -------
+    ``"bold green"`` if ``count`` is zero, ``"bold red"`` otherwise.
     """
     return "bold green" if count == 0 else "bold red"
 
@@ -294,12 +319,15 @@ def _count_style(count: int) -> str:
 def _status_cell(count: int) -> str:
     """Render a count as a colored PASS/FAIL check-mark cell for a rich table.
 
-    Args:
-        count: The finding count to render.
+    Parameters
+    ----------
+    count
+        The finding count to render.
 
-    Returns:
-        A rich markup string: a green checkmark for zero, a red cross with
-        the count otherwise.
+    Returns
+    -------
+    A rich markup string: a green checkmark for zero, a red cross with
+    the count otherwise.
     """
     if count == 0:
         return "[bold green]✓ 0[/]"
@@ -313,11 +341,14 @@ def _new_table(columns: list[str]) -> Table:
     separately so it isn't constrained (and wrapped) by the table's
     auto-sized column widths.
 
-    Args:
-        columns: Column header labels, in order.
+    Parameters
+    ----------
+    columns
+        Column header labels, in order.
 
-    Returns:
-        An empty rich Table ready to have rows added.
+    Returns
+    -------
+    An empty rich Table ready to have rows added.
     """
     table = Table(
         box=box.SIMPLE_HEAD,
@@ -340,13 +371,17 @@ def _section_renderables(title: str, table: Table | None) -> list[RenderableType
     ``console.print`` as its own separate output block, which fragments the
     dashboard if it's built from many small print calls.
 
-    Args:
-        title: The section heading text.
-        table: The table to render, or ``None`` to render a "(none)"
-            placeholder instead (e.g. no identifier columns configured).
+    Parameters
+    ----------
+    title
+        The section heading text.
+    table
+        The table to render, or ``None`` to render a "(none)" placeholder
+        instead (e.g. no identifier columns configured).
 
-    Returns:
-        The renderables for this section, in display order.
+    Returns
+    -------
+    The renderables for this section, in display order.
     """
     placeholder = "  (no identifier columns configured/available)"
     return [f"[bold cyan]{title}[/]", table if table is not None else placeholder, ""]
@@ -355,11 +390,14 @@ def _section_renderables(title: str, table: Table | None) -> list[RenderableType
 def _leakage_table(s: dict) -> Table:
     """Build the train-test leakage summary table.
 
-    Args:
-        s: The report's ``"summary"`` dict.
+    Parameters
+    ----------
+    s
+        The report's ``"summary"`` dict.
 
-    Returns:
-        A rich table with one row per leakage check.
+    Returns
+    -------
+    A rich table with one row per leakage check.
     """
     table = _new_table(["Check", "Result"])
     table.add_row(
@@ -381,12 +419,15 @@ def _leakage_table(s: dict) -> Table:
 def _duplicates_table(s: dict) -> Table:
     """Build the internal (within-split) duplicates summary table.
 
-    Args:
-        s: The report's ``"summary"`` dict.
+    Parameters
+    ----------
+    s
+        The report's ``"summary"`` dict.
 
-    Returns:
-        A rich table with one row per representation/identifier column,
-        showing train and test counts side by side.
+    Returns
+    -------
+    A rich table with one row per representation/identifier column,
+    showing train and test counts side by side.
     """
     table = _new_table(["Representation", "Train", "Test"])
     for representation in ("raw_smiles", "canonical_smiles", "inchikey"):
@@ -407,12 +448,15 @@ def _duplicates_table(s: dict) -> Table:
 def _namespace_table(s: dict) -> Table | None:
     """Build the identifier namespace consistency summary table.
 
-    Args:
-        s: The report's ``"summary"`` dict.
+    Parameters
+    ----------
+    s
+        The report's ``"summary"`` dict.
 
-    Returns:
-        A rich table with one row per identifier column, or ``None`` if no
-        identifier columns were configured/available.
+    Returns
+    -------
+    A rich table with one row per identifier column, or ``None`` if no
+    identifier columns were configured/available.
     """
     if not s["total_identifier_namespace_issues"]:
         return None
@@ -429,12 +473,15 @@ def _namespace_table(s: dict) -> Table | None:
 def _quality_table(s: dict) -> Table:
     """Build the quality-filter flags summary table.
 
-    Args:
-        s: The report's ``"summary"`` dict.
+    Parameters
+    ----------
+    s
+        The report's ``"summary"`` dict.
 
-    Returns:
-        A rich table with one row per quality-filter category, showing train
-        and test counts side by side.
+    Returns
+    -------
+    A rich table with one row per quality-filter category, showing train
+    and test counts side by side.
     """
     table = _new_table(["Filter", "Train", "Test"])
     table.add_row(
@@ -458,11 +505,14 @@ def _quality_table(s: dict) -> Table:
 def _total_issue_count(s: dict) -> int:
     """Sum every finding count in the summary into a single overall issue count.
 
-    Args:
-        s: The report's ``"summary"`` dict.
+    Parameters
+    ----------
+    s
+        The report's ``"summary"`` dict.
 
-    Returns:
-        The total number of flagged findings across every check.
+    Returns
+    -------
+    The total number of flagged findings across every check.
     """
     return (
         s["total_unparseable"]
@@ -496,11 +546,14 @@ def print_summary(report: dict, report_output: str | Path | None) -> None:
     several (in a Jupyter notebook, each individual ``console.print`` call
     renders as its own separate output).
 
-    Args:
-        report: The report dict, as returned by ``build_report``.
-        report_output: Path the full report was written to, shown in the
-            final line of the dashboard, or ``None`` if it wasn't written to
-            disk (that line is then omitted).
+    Parameters
+    ----------
+    report
+        The report dict, as returned by ``build_report``.
+    report_output
+        Path the full report was written to, shown in the final line of
+        the dashboard, or ``None`` if it wasn't written to disk (that line
+        is then omitted).
     """
     s = report["summary"]
 
@@ -539,11 +592,14 @@ def print_summary(report: dict, report_output: str | Path | None) -> None:
 def _fmt_location(location: dict) -> str:
     """Format a record location dict as a single readable line.
 
-    Args:
-        location: A location dict, as returned by ``MoleculeRecord.location``.
+    Parameters
+    ----------
+    location
+        A location dict, as returned by ``MoleculeRecord.location``.
 
-    Returns:
-        A string like ``[train] data/train.csv (row 3): 'CCO'``.
+    Returns
+    -------
+    A string like ``[train] data/train.csv (row 3): 'CCO'``.
     """
     return (
         f"[{location['pool']}] {location['source_file']} "
@@ -554,12 +610,16 @@ def _fmt_location(location: dict) -> str:
 def _fmt_locations(locations: list[dict], indent: str = "      ") -> list[str]:
     """Format a list of record locations as indented lines.
 
-    Args:
-        locations: The location dicts to format.
-        indent: Prefix to indent each line with.
+    Parameters
+    ----------
+    locations
+        The location dicts to format.
+    indent
+        Prefix to indent each line with.
 
-    Returns:
-        One formatted, indented line per location.
+    Returns
+    -------
+    One formatted, indented line per location.
     """
     return [f"{indent}{_fmt_location(loc)}" for loc in locations]
 
@@ -567,13 +627,17 @@ def _fmt_locations(locations: list[dict], indent: str = "      ") -> list[str]:
 def _section(title: str, body_lines: list[str]) -> list[str]:
     """Build a titled section of the text report, with a placeholder if empty.
 
-    Args:
-        title: The section title.
-        body_lines: The section's content lines.
+    Parameters
+    ----------
+    title
+        The section title.
+    body_lines
+        The section's content lines.
 
-    Returns:
-        The title, an underline, the body lines (or a "(none)" placeholder
-        if ``body_lines`` is empty), and a trailing blank line.
+    Returns
+    -------
+    The title, an underline, the body lines (or a "(none)" placeholder
+    if ``body_lines`` is empty), and a trailing blank line.
     """
     lines = [title, "-" * len(title)]
     lines.extend(body_lines if body_lines else ["  (none)"])
@@ -584,11 +648,14 @@ def _section(title: str, body_lines: list[str]) -> list[str]:
 def _exact_leakage_lines(exact_leakage: dict[str, list[dict]]) -> list[str]:
     """Render exact train/test leakage findings (raw/canonical SMILES, InChIKey).
 
-    Args:
-        exact_leakage: The result of ``checks.train_test_leakage``.
+    Parameters
+    ----------
+    exact_leakage
+        The result of ``checks.train_test_leakage``.
 
-    Returns:
-        One block of lines per representation with a leaked value.
+    Returns
+    -------
+    One block of lines per representation with a leaked value.
     """
     lines = []
     for representation, findings in exact_leakage.items():
@@ -602,11 +669,14 @@ def _exact_leakage_lines(exact_leakage: dict[str, list[dict]]) -> list[str]:
 def _identifier_leakage_lines(id_leakage: dict[str, list[dict]]) -> list[str]:
     """Render identifier-column overlap findings between train and test.
 
-    Args:
-        id_leakage: The result of ``checks.identifier_leakage``.
+    Parameters
+    ----------
+    id_leakage
+        The result of ``checks.identifier_leakage``.
 
-    Returns:
-        One block of lines per identifier column value shared across pools.
+    Returns
+    -------
+    One block of lines per identifier column value shared across pools.
     """
     lines = []
     for column, findings in id_leakage.items():
@@ -620,11 +690,14 @@ def _identifier_leakage_lines(id_leakage: dict[str, list[dict]]) -> list[str]:
 def _tanimoto_lines(tanimoto: list[dict]) -> list[str]:
     """Render Tanimoto similarity leakage findings.
 
-    Args:
-        tanimoto: The result of ``checks.tanimoto_leakage``.
+    Parameters
+    ----------
+    tanimoto
+        The result of ``checks.tanimoto_leakage``.
 
-    Returns:
-        One block of lines per flagged train/test pair.
+    Returns
+    -------
+    One block of lines per flagged train/test pair.
     """
     lines = []
     for finding in tanimoto:
@@ -636,12 +709,15 @@ def _tanimoto_lines(tanimoto: list[dict]) -> list[str]:
 def _internal_duplicates_lines(dupes: dict) -> list[str]:
     """Render within-split internal duplicate findings.
 
-    Args:
-        dupes: The result of ``checks.internal_duplicates`` for one pool.
+    Parameters
+    ----------
+    dupes
+        The result of ``checks.internal_duplicates`` for one pool.
 
-    Returns:
-        One block of lines per duplicated value, across representations and
-        identifier columns.
+    Returns
+    -------
+    One block of lines per duplicated value, across representations and
+    identifier columns.
     """
     lines = []
     for representation, findings in dupes.items():
@@ -660,11 +736,14 @@ def _internal_duplicates_lines(dupes: dict) -> list[str]:
 def _identifier_namespace_lines(namespace_issues: dict[str, dict[str, list[dict]]]) -> list[str]:
     """Render identifier-to-structure namespace consistency findings.
 
-    Args:
-        namespace_issues: The result of ``checks.identifier_namespace_issues``.
+    Parameters
+    ----------
+    namespace_issues
+        The result of ``checks.identifier_namespace_issues``.
 
-    Returns:
-        One block of lines per identifier column with namespace issues.
+    Returns
+    -------
+    One block of lines per identifier column with namespace issues.
     """
     lines = []
     for column, issues in namespace_issues.items():
@@ -690,11 +769,14 @@ def _identifier_namespace_lines(namespace_issues: dict[str, dict[str, list[dict]
 def _quality_flag_lines(quality_flags: dict[str, list[dict]]) -> list[str]:
     """Render quality-filter findings (mixtures, salts/metals, suspicious fragments).
 
-    Args:
-        quality_flags: The result of ``quality_flag_entries`` for one pool.
+    Parameters
+    ----------
+    quality_flags
+        The result of ``quality_flag_entries`` for one pool.
 
-    Returns:
-        One block of lines per flagged category with findings.
+    Returns
+    -------
+    One block of lines per flagged category with findings.
     """
     lines = []
     for category, locations in quality_flags.items():
@@ -712,11 +794,14 @@ def format_report_as_text(report: dict) -> str:
     files, values, and similarity scores) rendered as prose instead of raw
     JSON, for easier manual review.
 
-    Args:
-        report: The report dict, as returned by ``build_report``.
+    Parameters
+    ----------
+    report
+        The report dict, as returned by ``build_report``.
 
-    Returns:
-        The full text report as a single string.
+    Returns
+    -------
+    The full text report as a single string.
     """
     cfg = report["config"]
     lines = [

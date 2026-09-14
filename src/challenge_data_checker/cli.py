@@ -12,9 +12,9 @@ from challenge_data_checker.io_utils import ColumnResolutionError
 def build_arg_parser() -> argparse.ArgumentParser:
     """Build the command-line argument parser.
 
-    Returns:
-        The configured argument parser.
-
+    Returns
+    -------
+    The configured argument parser.
     """
     parser = argparse.ArgumentParser(
         prog="challenge-data-checker",
@@ -33,13 +33,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def run(config_path: str) -> dict:
     """Run the full audit for a given config path.
 
-    Args:
-        config_path: Path to the TOML configuration file.
+    Parameters
+    ----------
+    config_path
+        Path to the TOML configuration file.
 
-    Returns:
-        The JSON-serialisable report dict, as returned by
-        ``report.build_report``.
-
+    Returns
+    -------
+    The JSON-serialisable report dict, as returned by ``report.build_report``.
     """
     config = load_config(config_path)
     return run_audit(config)
@@ -48,14 +49,16 @@ def run(config_path: str) -> dict:
 def main(argv: list[str] | None = None) -> int:
     """Parse arguments and run the audit as a command-line program.
 
-    Args:
-        argv: Command-line arguments (excluding the program name), or
-            ``None`` to use ``sys.argv``.
+    Parameters
+    ----------
+    argv
+        Command-line arguments (excluding the program name), or ``None``
+        to use ``sys.argv``.
 
-    Returns:
-        The process exit code: ``0`` on success, ``1`` if a configuration or
-        input error occurred.
-
+    Returns
+    -------
+    The process exit code: ``0`` on success, ``1`` if a configuration or
+    input error occurred.
     """
     parser = build_arg_parser()
     args = parser.parse_args(argv)
