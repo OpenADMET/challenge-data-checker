@@ -15,12 +15,13 @@ def unparseable_entries(records: list[MoleculeRecord]) -> list[dict]:
 
     Parameters
     ----------
-    records
+    records : list[MoleculeRecord]
         The records to inspect.
 
     Returns
     -------
-    A list of location/error dicts, one per unparseable record.
+    list[dict]
+        A list of location/error dicts, one per unparseable record.
     """
     return [{**r.location(), "error": r.parse_error} for r in records if not r.is_parsed]
 
@@ -30,15 +31,16 @@ def _index_by(records: list[MoleculeRecord], key_func: KeyFunc) -> dict[str, lis
 
     Parameters
     ----------
-    records
+    records : list[MoleculeRecord]
         The records to index.
-    key_func
+    key_func : KeyFunc
         A function mapping a record to its grouping key, or ``None`` to
         exclude the record.
 
     Returns
     -------
-    A mapping of key to the list of records sharing that key.
+    dict[str, list[MoleculeRecord]]
+        A mapping of key to the list of records sharing that key.
     """
     index: dict[str, list[MoleculeRecord]] = defaultdict(list)
     for r in records:
@@ -53,9 +55,10 @@ def _representation_key_funcs() -> dict[str, KeyFunc]:
 
     Returns
     -------
-    A mapping of representation name (``raw_smiles``, ``canonical_smiles``,
-    ``inchikey``) to a function extracting that representation's value
-    from a record.
+    dict[str, KeyFunc]
+        A mapping of representation name (``raw_smiles``,
+        ``canonical_smiles``, ``inchikey``) to a function extracting that
+        representation's value from a record.
     """
     return {
         "raw_smiles": lambda r: r.raw_smiles if r.raw_smiles else None,
@@ -69,12 +72,13 @@ def _identifier_key_func(col: str) -> KeyFunc:
 
     Parameters
     ----------
-    col
+    col : str
         The identifier column name to extract.
 
     Returns
     -------
-    A function mapping a record to its value for ``col``.
+    KeyFunc
+        A function mapping a record to its value for ``col``.
     """
 
     def key_func(r: MoleculeRecord) -> str | None:
@@ -90,15 +94,16 @@ def train_test_leakage(
 
     Parameters
     ----------
-    train_records
+    train_records : list[MoleculeRecord]
         Processed records from the training pool.
-    test_records
+    test_records : list[MoleculeRecord]
         Processed records from the test pool.
 
     Returns
     -------
-    A mapping of representation name to a list of leakage findings, each
-    with the shared value and its train/test occurrences.
+    dict[str, list[dict]]
+        A mapping of representation name to a list of leakage findings,
+        each with the shared value and its train/test occurrences.
     """
     result: dict[str, list[dict]] = {}
     for name, key_func in _representation_key_funcs().items():
@@ -125,17 +130,19 @@ def identifier_leakage(
 
     Parameters
     ----------
-    train_records
+    train_records : list[MoleculeRecord]
         Processed records from the training pool.
-    test_records
+    test_records : list[MoleculeRecord]
         Processed records from the test pool.
-    identifier_columns
+    identifier_columns : list[str]
         Identifier column names to check.
 
     Returns
     -------
-    A mapping of identifier column name to a list of leakage findings,
-    each with the shared identifier value and its train/test occurrences.
+    dict[str, list[dict]]
+        A mapping of identifier column name to a list of leakage
+        findings, each with the shared identifier value and its
+        train/test occurrences.
     """
     result: dict[str, list[dict]] = {}
     for col in identifier_columns:
@@ -161,17 +168,19 @@ def internal_duplicates(
 
     Parameters
     ----------
-    records
+    records : list[MoleculeRecord]
         Processed records from a single pool (train-only or test-only).
-    identifier_columns
+    identifier_columns : list[str]
         Identifier column names to check.
 
     Returns
     -------
-    A mapping with one entry per representation (``raw_smiles``,
-    ``canonical_smiles``, ``inchikey``) plus an ``"identifiers"`` entry
-    mapping each identifier column to its own duplicate findings. Each
-    finding lists the duplicated value and all of its occurrences.
+    dict[str, Any]
+        A mapping with one entry per representation (``raw_smiles``,
+        ``canonical_smiles``, ``inchikey``) plus an ``"identifiers"``
+        entry mapping each identifier column to its own duplicate
+        findings. Each finding lists the duplicated value and all of its
+        occurrences.
     """
     result: dict[str, Any] = {}
     for name, key_func in _representation_key_funcs().items():
@@ -210,16 +219,17 @@ def identifier_namespace_issues(
 
     Parameters
     ----------
-    all_records
+    all_records : list[MoleculeRecord]
         Processed records from both the training and test pools, combined.
-    identifier_columns
+    identifier_columns : list[str]
         Identifier column names to check.
 
     Returns
     -------
-    A mapping of identifier column name to a dict with
-    ``one_id_multiple_structures`` and ``one_structure_multiple_ids``
-    finding lists.
+    dict[str, dict[str, list[dict]]]
+        A mapping of identifier column name to a dict with
+        ``one_id_multiple_structures`` and ``one_structure_multiple_ids``
+        finding lists.
     """
     result: dict[str, dict[str, list[dict]]] = {}
     for col in identifier_columns:
@@ -297,17 +307,18 @@ def tanimoto_leakage(
 
     Parameters
     ----------
-    train_records
+    train_records : list[MoleculeRecord]
         Processed records from the training pool.
-    test_records
+    test_records : list[MoleculeRecord]
         Processed records from the test pool.
-    threshold
+    threshold : float
         Minimum Tanimoto similarity (inclusive) to flag a pair.
 
     Returns
     -------
-    A list of findings, each with the train/test locations and their
-    similarity, sorted by descending similarity.
+    list[dict]
+        A list of findings, each with the train/test locations and their
+        similarity, sorted by descending similarity.
     """
     train_valid = [r for r in train_records if r.fingerprint is not None]
     test_valid = [r for r in test_records if r.fingerprint is not None]

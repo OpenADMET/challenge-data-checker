@@ -27,13 +27,15 @@ def quality_flag_entries(records: list[MoleculeRecord]) -> dict[str, list[dict]]
 
     Parameters
     ----------
-    records
+    records : list[MoleculeRecord]
         Processed records from a single pool.
 
     Returns
     -------
-    A mapping of ``"mixtures"``, ``"salts_or_metal_complexes"``, and
-    ``"suspicious_fragments"`` to the list of matching record locations.
+    dict[str, list[dict]]
+        A mapping of ``"mixtures"``, ``"salts_or_metal_complexes"``, and
+        ``"suspicious_fragments"`` to the list of matching record
+        locations.
     """
     return {
         "mixtures": [r.location() for r in records if r.is_parsed and r.is_mixture],
@@ -51,15 +53,17 @@ def _unique_leaked_locations(exact_leakage: dict[str, list[dict]], side: str) ->
 
     Parameters
     ----------
-    exact_leakage
+    exact_leakage : dict[str, list[dict]]
         The result of ``checks.train_test_leakage``.
-    side
+    side : str
         Which side to count, ``"train"`` or ``"test"``.
 
     Returns
     -------
-    The number of distinct (pool, source_file, row_index) rows appearing
-    as a ``{side}_occurrences`` entry across all representations.
+    int
+        The number of distinct (pool, source_file, row_index) rows
+        appearing as a ``{side}_occurrences`` entry across all
+        representations.
     """
     seen = set()
     for entries in exact_leakage.values():
@@ -80,15 +84,15 @@ def build_report(
 
     Parameters
     ----------
-    config
+    config : Config
         The validated configuration used for this run.
-    train_records
+    train_records : list[MoleculeRecord]
         Processed records from the training pool.
-    test_records
+    test_records : list[MoleculeRecord]
         Processed records from the test pool.
-    identifier_columns
+    identifier_columns : list[str]
         Identifier columns present in at least one pool.
-    resolved_smiles_columns
+    resolved_smiles_columns : dict[str, dict[str, str]] | None
         The SMILES column actually resolved for each source, as
         ``{"train": {source_label: column, ...}, "test": {...}}`` (see
         ``io_utils.load_pool``). Recorded in the report so it's
@@ -97,8 +101,9 @@ def build_report(
 
     Returns
     -------
-    The full report dict, containing the echoed config, a summary of
-    counts, and the detailed findings from every check.
+    dict
+        The full report dict, containing the echoed config, a summary of
+        counts, and the detailed findings from every check.
     """
     resolved_smiles_columns = resolved_smiles_columns or {"train": {}, "test": {}}
     generated_at = datetime.now().astimezone().isoformat(timespec="seconds")
@@ -193,13 +198,17 @@ def save_report(report: dict, output_path: str | Path, report_format: str = "jso
 
     Parameters
     ----------
-    report
+    report : dict
         The report dict, as returned by ``build_report``.
-    output_path
+    output_path : str | Path
         Path to write the report to.
-    report_format
+    report_format : str
         Either ``"json"`` (machine-readable, full fidelity) or ``"txt"``
         (human-readable prose rendering of the same findings).
+
+    Returns
+    -------
+    None
 
     Raises
     ------
@@ -222,12 +231,13 @@ def _fmt_counts(counts: dict[str, int]) -> str:
 
     Parameters
     ----------
-    counts
+    counts : dict[str, int]
         The counts to format.
 
     Returns
     -------
-    A comma-separated ``key=value`` string.
+    str
+        A comma-separated ``key=value`` string.
     """
     return ", ".join(f"{k}={v}" for k, v in counts.items())
 
@@ -237,13 +247,14 @@ def _build_summary_lines(report: dict) -> list[str]:
 
     Parameters
     ----------
-    report
+    report : dict
         The report dict, as returned by ``build_report``.
 
     Returns
     -------
-    The dashboard lines, banner included but with no trailing "written
-    to" line (callers add that themselves if relevant).
+    list[str]
+        The dashboard lines, banner included but with no trailing
+        "written to" line (callers add that themselves if relevant).
     """
     s = report["summary"]
     lines = [
@@ -306,12 +317,13 @@ def _count_style(count: int) -> str:
 
     Parameters
     ----------
-    count
+    count : int
         The finding count to style.
 
     Returns
     -------
-    ``"bold green"`` if ``count`` is zero, ``"bold red"`` otherwise.
+    str
+        ``"bold green"`` if ``count`` is zero, ``"bold red"`` otherwise.
     """
     return "bold green" if count == 0 else "bold red"
 
@@ -321,13 +333,14 @@ def _status_cell(count: int) -> str:
 
     Parameters
     ----------
-    count
+    count : int
         The finding count to render.
 
     Returns
     -------
-    A rich markup string: a green checkmark for zero, a red cross with
-    the count otherwise.
+    str
+        A rich markup string: a green checkmark for zero, a red cross
+        with the count otherwise.
     """
     if count == 0:
         return "[bold green]✓ 0[/]"
@@ -343,12 +356,13 @@ def _new_table(columns: list[str]) -> Table:
 
     Parameters
     ----------
-    columns
+    columns : list[str]
         Column header labels, in order.
 
     Returns
     -------
-    An empty rich Table ready to have rows added.
+    Table
+        An empty rich Table ready to have rows added.
     """
     table = Table(
         box=box.SIMPLE_HEAD,
@@ -373,15 +387,16 @@ def _section_renderables(title: str, table: Table | None) -> list[RenderableType
 
     Parameters
     ----------
-    title
+    title : str
         The section heading text.
-    table
+    table : Table | None
         The table to render, or ``None`` to render a "(none)" placeholder
         instead (e.g. no identifier columns configured).
 
     Returns
     -------
-    The renderables for this section, in display order.
+    list[RenderableType]
+        The renderables for this section, in display order.
     """
     placeholder = "  (no identifier columns configured/available)"
     return [f"[bold cyan]{title}[/]", table if table is not None else placeholder, ""]
@@ -392,12 +407,13 @@ def _leakage_table(s: dict) -> Table:
 
     Parameters
     ----------
-    s
+    s : dict
         The report's ``"summary"`` dict.
 
     Returns
     -------
-    A rich table with one row per leakage check.
+    Table
+        A rich table with one row per leakage check.
     """
     table = _new_table(["Check", "Result"])
     table.add_row(
@@ -421,13 +437,14 @@ def _duplicates_table(s: dict) -> Table:
 
     Parameters
     ----------
-    s
+    s : dict
         The report's ``"summary"`` dict.
 
     Returns
     -------
-    A rich table with one row per representation/identifier column,
-    showing train and test counts side by side.
+    Table
+        A rich table with one row per representation/identifier column,
+        showing train and test counts side by side.
     """
     table = _new_table(["Representation", "Train", "Test"])
     for representation in ("raw_smiles", "canonical_smiles", "inchikey"):
@@ -450,13 +467,14 @@ def _namespace_table(s: dict) -> Table | None:
 
     Parameters
     ----------
-    s
+    s : dict
         The report's ``"summary"`` dict.
 
     Returns
     -------
-    A rich table with one row per identifier column, or ``None`` if no
-    identifier columns were configured/available.
+    Table | None
+        A rich table with one row per identifier column, or ``None`` if
+        no identifier columns were configured/available.
     """
     if not s["total_identifier_namespace_issues"]:
         return None
@@ -475,13 +493,14 @@ def _quality_table(s: dict) -> Table:
 
     Parameters
     ----------
-    s
+    s : dict
         The report's ``"summary"`` dict.
 
     Returns
     -------
-    A rich table with one row per quality-filter category, showing train
-    and test counts side by side.
+    Table
+        A rich table with one row per quality-filter category, showing
+        train and test counts side by side.
     """
     table = _new_table(["Filter", "Train", "Test"])
     table.add_row(
@@ -507,12 +526,13 @@ def _total_issue_count(s: dict) -> int:
 
     Parameters
     ----------
-    s
+    s : dict
         The report's ``"summary"`` dict.
 
     Returns
     -------
-    The total number of flagged findings across every check.
+    int
+        The total number of flagged findings across every check.
     """
     return (
         s["total_unparseable"]
@@ -548,12 +568,16 @@ def print_summary(report: dict, report_output: str | Path | None) -> None:
 
     Parameters
     ----------
-    report
+    report : dict
         The report dict, as returned by ``build_report``.
-    report_output
+    report_output : str | Path | None
         Path the full report was written to, shown in the final line of
         the dashboard, or ``None`` if it wasn't written to disk (that line
         is then omitted).
+
+    Returns
+    -------
+    None
     """
     s = report["summary"]
 
@@ -594,12 +618,13 @@ def _fmt_location(location: dict) -> str:
 
     Parameters
     ----------
-    location
+    location : dict
         A location dict, as returned by ``MoleculeRecord.location``.
 
     Returns
     -------
-    A string like ``[train] data/train.csv (row 3): 'CCO'``.
+    str
+        A string like ``[train] data/train.csv (row 3): 'CCO'``.
     """
     return (
         f"[{location['pool']}] {location['source_file']} "
@@ -612,14 +637,15 @@ def _fmt_locations(locations: list[dict], indent: str = "      ") -> list[str]:
 
     Parameters
     ----------
-    locations
+    locations : list[dict]
         The location dicts to format.
-    indent
+    indent : str
         Prefix to indent each line with.
 
     Returns
     -------
-    One formatted, indented line per location.
+    list[str]
+        One formatted, indented line per location.
     """
     return [f"{indent}{_fmt_location(loc)}" for loc in locations]
 
@@ -629,15 +655,17 @@ def _section(title: str, body_lines: list[str]) -> list[str]:
 
     Parameters
     ----------
-    title
+    title : str
         The section title.
-    body_lines
+    body_lines : list[str]
         The section's content lines.
 
     Returns
     -------
-    The title, an underline, the body lines (or a "(none)" placeholder
-    if ``body_lines`` is empty), and a trailing blank line.
+    list[str]
+        The title, an underline, the body lines (or a "(none)"
+        placeholder if ``body_lines`` is empty), and a trailing blank
+        line.
     """
     lines = [title, "-" * len(title)]
     lines.extend(body_lines if body_lines else ["  (none)"])
@@ -650,12 +678,13 @@ def _exact_leakage_lines(exact_leakage: dict[str, list[dict]]) -> list[str]:
 
     Parameters
     ----------
-    exact_leakage
+    exact_leakage : dict[str, list[dict]]
         The result of ``checks.train_test_leakage``.
 
     Returns
     -------
-    One block of lines per representation with a leaked value.
+    list[str]
+        One block of lines per representation with a leaked value.
     """
     lines = []
     for representation, findings in exact_leakage.items():
@@ -671,12 +700,14 @@ def _identifier_leakage_lines(id_leakage: dict[str, list[dict]]) -> list[str]:
 
     Parameters
     ----------
-    id_leakage
+    id_leakage : dict[str, list[dict]]
         The result of ``checks.identifier_leakage``.
 
     Returns
     -------
-    One block of lines per identifier column value shared across pools.
+    list[str]
+        One block of lines per identifier column value shared across
+        pools.
     """
     lines = []
     for column, findings in id_leakage.items():
@@ -692,12 +723,13 @@ def _tanimoto_lines(tanimoto: list[dict]) -> list[str]:
 
     Parameters
     ----------
-    tanimoto
+    tanimoto : list[dict]
         The result of ``checks.tanimoto_leakage``.
 
     Returns
     -------
-    One block of lines per flagged train/test pair.
+    list[str]
+        One block of lines per flagged train/test pair.
     """
     lines = []
     for finding in tanimoto:
@@ -711,13 +743,14 @@ def _internal_duplicates_lines(dupes: dict) -> list[str]:
 
     Parameters
     ----------
-    dupes
+    dupes : dict
         The result of ``checks.internal_duplicates`` for one pool.
 
     Returns
     -------
-    One block of lines per duplicated value, across representations and
-    identifier columns.
+    list[str]
+        One block of lines per duplicated value, across representations
+        and identifier columns.
     """
     lines = []
     for representation, findings in dupes.items():
@@ -738,12 +771,13 @@ def _identifier_namespace_lines(namespace_issues: dict[str, dict[str, list[dict]
 
     Parameters
     ----------
-    namespace_issues
+    namespace_issues : dict[str, dict[str, list[dict]]]
         The result of ``checks.identifier_namespace_issues``.
 
     Returns
     -------
-    One block of lines per identifier column with namespace issues.
+    list[str]
+        One block of lines per identifier column with namespace issues.
     """
     lines = []
     for column, issues in namespace_issues.items():
@@ -771,12 +805,13 @@ def _quality_flag_lines(quality_flags: dict[str, list[dict]]) -> list[str]:
 
     Parameters
     ----------
-    quality_flags
+    quality_flags : dict[str, list[dict]]
         The result of ``quality_flag_entries`` for one pool.
 
     Returns
     -------
-    One block of lines per flagged category with findings.
+    list[str]
+        One block of lines per flagged category with findings.
     """
     lines = []
     for category, locations in quality_flags.items():
@@ -796,12 +831,13 @@ def format_report_as_text(report: dict) -> str:
 
     Parameters
     ----------
-    report
+    report : dict
         The report dict, as returned by ``build_report``.
 
     Returns
     -------
-    The full text report as a single string.
+    str
+        The full text report as a single string.
     """
     cfg = report["config"]
     lines = [

@@ -20,13 +20,14 @@ def is_remote_source(source: str) -> bool:
 
     Parameters
     ----------
-    source
+    source : str
         A train/test data source string, as given in a config or passed
         to the Python API.
 
     Returns
     -------
-    ``True`` if ``source`` starts with ``http://`` or ``https://``.
+    bool
+        ``True`` if ``source`` starts with ``http://`` or ``https://``.
     """
     return source.startswith(("http://", "https://"))
 
@@ -40,13 +41,14 @@ def parse_hf_hub_url(url: str) -> tuple[str, str, str] | None:
 
     Parameters
     ----------
-    url
+    url : str
         The URL to parse.
 
     Returns
     -------
-    A ``(repo_id, revision, path)`` tuple, or ``None`` if ``url`` isn't a
-    recognised HuggingFace Hub dataset-file URL.
+    tuple[str, str, str] | None
+        A ``(repo_id, revision, path)`` tuple, or ``None`` if ``url``
+        isn't a recognised HuggingFace Hub dataset-file URL.
     """
     match = HF_HUB_URL_RE.match(url)
     if match is None:
@@ -59,18 +61,19 @@ def _download_from_hf_hub(repo_id: str, revision: str, path: str, url: str) -> P
 
     Parameters
     ----------
-    repo_id
+    repo_id : str
         The dataset repo id, e.g. ``"namespace/name"``.
-    revision
+    revision : str
         The branch, tag, or commit to download from.
-    path
+    path : str
         The file's path within the repo.
-    url
+    url : str
         The original URL, used only in error messages.
 
     Returns
     -------
-    The local path of the downloaded (and cached) file.
+    Path
+        The local path of the downloaded (and cached) file.
 
     Raises
     ------
@@ -107,15 +110,16 @@ def _download_generic_url(url: str) -> Path:
 
     Parameters
     ----------
-    url
+    url : str
         The URL to download.
 
     Returns
     -------
-    The path of a local temporary file holding the downloaded content,
-    with the same file extension as the URL's path (so ``.csv``/
-    ``.parquet`` detection downstream still works even with a query
-    string, e.g. a GitHub raw URL with a ``?token=...`` suffix).
+    Path
+        The path of a local temporary file holding the downloaded content,
+        with the same file extension as the URL's path (so ``.csv``/
+        ``.parquet`` detection downstream still works even with a query
+        string, e.g. a GitHub raw URL with a ``?token=...`` suffix).
 
     Raises
     ------
@@ -165,12 +169,13 @@ def resolve_remote_source(url: str) -> Path:
 
     Parameters
     ----------
-    url
+    url : str
         The URL to download.
 
     Returns
     -------
-    The local path of the downloaded file.
+    Path
+        The local path of the downloaded file.
     """
     hf_match = parse_hf_hub_url(url)
     if hf_match is not None:

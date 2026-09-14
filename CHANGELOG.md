@@ -4,6 +4,16 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); tagged releases use
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.3] - 2026-09-15
+
+### Changed
+
+- `pydoclint` now requires type hints in docstring `Parameters`/`Returns`
+  sections, checks return-type consistency against function signatures, and
+  requires an explicit `Returns` section (documenting `None`) for functions
+  that return nothing. All docstrings updated accordingly. No behaviour
+  change.
+
 ## [0.3.2] - 2026-09-15
 
 ### Changed

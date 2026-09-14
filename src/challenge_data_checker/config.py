@@ -21,14 +21,14 @@ class PathsConfig:
 
     Attributes
     ----------
-    train_files
+    train_files : Sequence[DataSource]
         Training data sources: paths to .csv/.parquet files, URLs to
         remote .csv/.parquet files (HuggingFace Hub or plain HTTP(S)),
         and/or already-loaded DataFrames (the latter only when built
         directly via the Python API, never from a TOML config).
-    test_files
+    test_files : Sequence[DataSource]
         Test data sources, in the same shapes as ``train_files``.
-    report_output
+    report_output : str | Path | None
         Path the audit report will be written to, in the format given by
         ``settings.report_format``, or ``None`` to skip writing a report
         file (Python API only; a TOML config always requires this).
@@ -45,9 +45,9 @@ class ColumnsConfig:
 
     Attributes
     ----------
-    smiles_column
+    smiles_column : str
         Name of the column containing SMILES strings.
-    identifier_columns
+    identifier_columns : list[str]
         Names of columns holding compound identifiers.
     """
 
@@ -61,16 +61,16 @@ class SettingsConfig:
 
     Attributes
     ----------
-    tautomer_standardisation
+    tautomer_standardisation : bool
         Whether to canonicalise tautomers before comparing molecules.
-    max_train_test_similarity
+    max_train_test_similarity : float
         Tanimoto similarity threshold (0.0-1.0) at or above which a
         train/test pair is flagged as possible leakage.
-    fp_radius
+    fp_radius : int
         Morgan fingerprint radius.
-    fp_n_bits
+    fp_n_bits : int
         Morgan fingerprint bit-vector length.
-    report_format
+    report_format : str
         Output format for the audit report, ``"json"`` or ``"txt"``. If
         not set explicitly in the config, it is inferred from
         ``paths.report_output``'s file extension: ``.txt`` implies
@@ -90,13 +90,13 @@ class Config:
 
     Attributes
     ----------
-    paths
+    paths : PathsConfig
         Input/output file paths.
-    columns
+    columns : ColumnsConfig
         SMILES and identifier column configuration.
-    settings
+    settings : SettingsConfig
         Optional chemistry/matching settings.
-    config_path
+    config_path : Path
         Path the configuration was loaded from.
     """
 
@@ -111,16 +111,17 @@ def infer_report_format(explicit: str | None, report_output: str | Path | None) 
 
     Parameters
     ----------
-    explicit
+    explicit : str | None
         The user-specified ``report_format``, or ``None`` if not set.
-    report_output
+    report_output : str | Path | None
         The path the report will be written to, or ``None`` if it won't
         be written to disk.
 
     Returns
     -------
-    ``explicit`` (lowercased) if given; otherwise ``"txt"`` if
-    ``report_output`` ends in ``.txt``, otherwise ``"json"``.
+    str
+        ``explicit`` (lowercased) if given; otherwise ``"txt"`` if
+        ``report_output`` ends in ``.txt``, otherwise ``"json"``.
     """
     if explicit is not None:
         return explicit.lower()
@@ -134,16 +135,17 @@ def _require(section: dict, key: str, section_name: str) -> object:
 
     Parameters
     ----------
-    section
+    section : dict
         The parsed TOML section.
-    key
+    key : str
         The key to look up within ``section``.
-    section_name
+    section_name : str
         Name of the section, used only in error messages.
 
     Returns
     -------
-    The value stored under ``key``.
+    object
+        The value stored under ``key``.
 
     Raises
     ------
@@ -160,16 +162,17 @@ def _require_str_list(section: dict, key: str, section_name: str) -> list[str]:
 
     Parameters
     ----------
-    section
+    section : dict
         The parsed TOML section.
-    key
+    key : str
         The key to look up within ``section``.
-    section_name
+    section_name : str
         Name of the section, used only in error messages.
 
     Returns
     -------
-    The list of strings stored under ``key``.
+    list[str]
+        The list of strings stored under ``key``.
 
     Raises
     ------
@@ -189,12 +192,13 @@ def load_config(config_path: str | Path) -> Config:
 
     Parameters
     ----------
-    config_path
+    config_path : str | Path
         Path to the TOML configuration file.
 
     Returns
     -------
-    The parsed and validated configuration.
+    Config
+        The parsed and validated configuration.
 
     Raises
     ------

@@ -15,18 +15,20 @@ def run_audit(config: Config, *, save: bool = True, print_report: bool = True) -
 
     Parameters
     ----------
-    config
+    config : Config
         The configuration to audit with, however it was built (from
         a TOML file, or directly via ``api.audit``).
-    save
+    save : bool
         Whether to write the report to ``config.paths.report_output``.
         Has no effect if ``report_output`` is ``None``.
-    print_report
+    print_report : bool
         Whether to print the stdout summary dashboard.
 
     Returns
     -------
-    The JSON-serialisable report dict, as returned by ``report.build_report``.
+    dict
+        The JSON-serialisable report dict, as returned by
+        ``report.build_report``.
     """
     train_df, train_identifier_cols, train_smiles_cols = load_pool(
         config.paths.train_files, config.columns.smiles_column, config.columns.identifier_columns

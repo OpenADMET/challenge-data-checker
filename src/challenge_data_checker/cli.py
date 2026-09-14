@@ -14,7 +14,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     Returns
     -------
-    The configured argument parser.
+    argparse.ArgumentParser
+        The configured argument parser.
     """
     parser = argparse.ArgumentParser(
         prog="challenge-data-checker",
@@ -35,12 +36,14 @@ def run(config_path: str) -> dict:
 
     Parameters
     ----------
-    config_path
+    config_path : str
         Path to the TOML configuration file.
 
     Returns
     -------
-    The JSON-serialisable report dict, as returned by ``report.build_report``.
+    dict
+        The JSON-serialisable report dict, as returned by
+        ``report.build_report``.
     """
     config = load_config(config_path)
     return run_audit(config)
@@ -51,14 +54,15 @@ def main(argv: list[str] | None = None) -> int:
 
     Parameters
     ----------
-    argv
+    argv : list[str] | None
         Command-line arguments (excluding the program name), or ``None``
         to use ``sys.argv``.
 
     Returns
     -------
-    The process exit code: ``0`` on success, ``1`` if a configuration or
-    input error occurred.
+    int
+        The process exit code: ``0`` on success, ``1`` if a configuration
+        or input error occurred.
     """
     parser = build_arg_parser()
     args = parser.parse_args(argv)

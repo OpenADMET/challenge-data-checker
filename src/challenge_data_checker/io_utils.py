@@ -40,12 +40,13 @@ def load_table(path: str | Path) -> pd.DataFrame:
 
     Parameters
     ----------
-    path
+    path : str | Path
         Path to a .csv or .parquet data file.
 
     Returns
     -------
-    The loaded data as a DataFrame.
+    pd.DataFrame
+        The loaded data as a DataFrame.
 
     Raises
     ------
@@ -75,16 +76,17 @@ def describe_source(source: DataSource, index: int) -> str:
 
     Parameters
     ----------
-    source
+    source : DataSource
         A file path, or an in-memory DataFrame.
-    index
+    index : int
         The source's position in its train/test list, used to distinguish
         multiple in-memory DataFrames from one another.
 
     Returns
     -------
-    The path as a string, or ``"<in-memory dataframe #N (R rows)>"`` for
-    a DataFrame.
+    str
+        The path as a string, or ``"<in-memory dataframe #N (R rows)>"``
+        for a DataFrame.
     """
     if isinstance(source, pd.DataFrame):
         return f"<in-memory dataframe #{index} ({len(source)} rows)>"
@@ -107,17 +109,18 @@ def resolve_smiles_column(
 
     Parameters
     ----------
-    columns
+    columns : list[str]
         Column names available in the loaded DataFrame.
-    configured_name
+    configured_name : str
         The ``smiles_column`` value from the config.
-    source_label
+    source_label : str
         Label identifying the source, used only in the warning message
         logged on alias fallback.
 
     Returns
     -------
-    The resolved column name, exactly as it appears in ``columns``.
+    str
+        The resolved column name, exactly as it appears in ``columns``.
 
     Raises
     ------
@@ -176,16 +179,18 @@ def check_identifier_columns(
 
     Parameters
     ----------
-    columns
+    columns : list[str]
         Column names available in the loaded DataFrame.
-    identifier_columns
+    identifier_columns : list[str]
         Identifier column names from the config.
-    file_path
+    file_path : str | Path
         Path of the file being checked, used only in the warning message.
 
     Returns
     -------
-    The subset of ``identifier_columns`` that are present in ``columns``.
+    list[str]
+        The subset of ``identifier_columns`` that are present in
+        ``columns``.
     """
     present = []
     for col in identifier_columns:
@@ -216,22 +221,26 @@ def load_pool(
 
     Parameters
     ----------
-    sources
+    sources : Sequence[DataSource]
         Paths to .csv/.parquet files, URLs to remote .csv/.parquet files
         (HuggingFace Hub or plain HTTP(S)), and/or already-loaded
         DataFrames to load (if needed) and pool together.
-    smiles_column
+    smiles_column : str
         The configured SMILES column name to resolve in each source.
-    identifier_columns
+    identifier_columns : list[str]
         Identifier column names from the config.
 
     Returns
     -------
-    A tuple of the pooled DataFrame, the list of identifier columns
-    present in at least one of the sources (used for later checks), and
-    a mapping of source label to the SMILES column actually resolved for
-    that source (so the report can record it even when it silently
-    differs from ``smiles_column``).
+    pd.DataFrame
+        The pooled DataFrame.
+    list[str]
+        The identifier columns present in at least one of the sources
+        (used for later checks).
+    dict[str, str]
+        A mapping of source label to the SMILES column actually resolved
+        for that source (so the report can record it even when it
+        silently differs from ``smiles_column``).
     """
     frames = []
     identifier_columns_seen: list[str] = []

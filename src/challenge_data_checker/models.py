@@ -12,39 +12,39 @@ class MoleculeRecord:
 
     Attributes
     ----------
-    pool
+    pool : str
         Which pool the row belongs to, ``"train"`` or ``"test"``.
-    source_file
+    source_file : str
         Path of the file the row was loaded from.
-    row_index
+    row_index : int
         Original row index within ``source_file``.
-    raw_smiles
+    raw_smiles : str
         The raw SMILES string as read from the input file.
-    identifiers
+    identifiers : dict[str, str | None]
         Mapping of identifier column name to its value for this row
         (``None`` if the column was absent or the cell was empty).
-    parse_error
+    parse_error : str | None
         Description of why parsing/processing failed, or ``None`` if the
         row was processed successfully.
-    canonical_smiles
+    canonical_smiles : str | None
         RDKit canonical SMILES, or ``None`` if unparsed.
-    inchikey
+    inchikey : str | None
         InChIKey, or ``None`` if unparsed or InChIKey generation failed.
-    fingerprint
+    fingerprint : Fingerprint | None
         Stereo-blind Morgan fingerprint, or ``None`` if unparsed.
-    heavy_atom_count
+    heavy_atom_count : int | None
         Number of heavy atoms, or ``None`` if unparsed.
-    num_fragments
+    num_fragments : int | None
         Number of disconnected fragments, or ``None`` if unparsed.
-    has_dot
+    has_dot : bool
         Whether the raw SMILES contains a ``.`` fragment separator.
-    contains_metal
+    contains_metal : bool
         Whether any atom is a transition/heavy/alkali(-earth) metal.
-    is_mixture
+    is_mixture : bool
         Whether the molecule has multiple disconnected fragments.
-    is_salt_or_metal
+    is_salt_or_metal : bool
         Whether the molecule is a salt or metal complex.
-    is_suspicious_fragment
+    is_suspicious_fragment : bool
         Whether the molecule looks like a stripped degradation artefact
         (e.g. a bare counterion).
     """
@@ -74,7 +74,8 @@ class MoleculeRecord:
 
         Returns
         -------
-        ``True`` if ``parse_error`` is ``None``, ``False`` otherwise.
+        bool
+            ``True`` if ``parse_error`` is ``None``, ``False`` otherwise.
         """
         return self.parse_error is None
 
@@ -83,7 +84,8 @@ class MoleculeRecord:
 
         Returns
         -------
-        A dict with the pool, source file, row index, and raw SMILES.
+        dict[str, object]
+            A dict with the pool, source file, row index, and raw SMILES.
         """
         return {
             "pool": self.pool,

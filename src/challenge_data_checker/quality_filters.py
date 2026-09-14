@@ -109,12 +109,13 @@ def _canonical(smiles: str) -> str | None:
 
     Parameters
     ----------
-    smiles
+    smiles : str
         The SMILES string to canonicalise.
 
     Returns
     -------
-    The RDKit canonical SMILES, or ``None`` if parsing failed.
+    str | None
+        The RDKit canonical SMILES, or ``None`` if parsing failed.
     """
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
@@ -132,15 +133,16 @@ def has_multiple_fragments(mol: Chem.Mol, raw_smiles: str) -> bool:
 
     Parameters
     ----------
-    mol
+    mol : Chem.Mol
         The parsed molecule.
-    raw_smiles
+    raw_smiles : str
         The original SMILES string the molecule was parsed from.
 
     Returns
     -------
-    ``True`` if the SMILES contains a ``.`` or the parsed molecule has
-    more than one fragment, ``False`` otherwise.
+    bool
+        ``True`` if the SMILES contains a ``.`` or the parsed molecule has
+        more than one fragment, ``False`` otherwise.
     """
     if "." in raw_smiles:
         return True
@@ -152,13 +154,14 @@ def contains_metal(mol: Chem.Mol) -> bool:
 
     Parameters
     ----------
-    mol
+    mol : Chem.Mol
         The parsed molecule.
 
     Returns
     -------
-    ``True`` if any atom is a transition/heavy/alkali(-earth) metal,
-    ``False`` otherwise.
+    bool
+        ``True`` if any atom is a transition/heavy/alkali(-earth) metal,
+        ``False`` otherwise.
     """
     return any(atom.GetSymbol() in METAL_SYMBOLS for atom in mol.GetAtoms())
 
@@ -168,13 +171,14 @@ def is_salt_or_metal_complex(mol: Chem.Mol) -> bool:
 
     Parameters
     ----------
-    mol
+    mol : Chem.Mol
         The parsed molecule.
 
     Returns
     -------
-    ``True`` if the molecule contains a metal, or any of its fragments is
-    a known counterion, ``False`` otherwise.
+    bool
+        ``True`` if the molecule contains a metal, or any of its fragments
+        is a known counterion, ``False`` otherwise.
     """
     if contains_metal(mol):
         return True
@@ -194,15 +198,16 @@ def is_suspicious_small_fragment(mol: Chem.Mol, heavy_atom_count: int) -> bool:
 
     Parameters
     ----------
-    mol
+    mol : Chem.Mol
         The parsed molecule.
-    heavy_atom_count
+    heavy_atom_count : int
         The molecule's heavy atom count.
 
     Returns
     -------
-    ``True`` if the molecule is a suspiciously small fragment, ``False``
-    otherwise.
+    bool
+        ``True`` if the molecule is a suspiciously small fragment,
+        ``False`` otherwise.
     """
     if heavy_atom_count > 3:
         return False

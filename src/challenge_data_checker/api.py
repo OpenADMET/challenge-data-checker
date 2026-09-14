@@ -30,12 +30,13 @@ def _as_source_list(data: DataInput) -> list[DataSource]:
 
     Parameters
     ----------
-    data
+    data : DataInput
         A single path/DataFrame, or a sequence of them.
 
     Returns
     -------
-    ``data`` as a list, wrapping a lone path/DataFrame in a list.
+    list[DataSource]
+        ``data`` as a list, wrapping a lone path/DataFrame in a list.
     """
     if isinstance(data, (str, Path, pd.DataFrame)):
         return [data]
@@ -64,41 +65,42 @@ def audit(
 
     Parameters
     ----------
-    train
+    train : DataInput
         Training data: a single .csv/.parquet path or DataFrame, or a list
         mixing either.
-    test
+    test : DataInput
         Test data, in the same shapes as ``train``.
-    smiles_column
+    smiles_column : str
         Name of the SMILES column, resolved per source (exact match, then
         case-insensitive, then a common alias like ``smi`` or ``structure``).
-    identifier_columns
+    identifier_columns : Sequence[str] | None
         Optional compound identifier column names to cross-check for
         leakage/namespace issues.
-    tautomer_standardisation
+    tautomer_standardisation : bool
         Whether to canonicalise tautomers before comparing molecules.
-    max_train_test_similarity
+    max_train_test_similarity : float
         Tanimoto similarity threshold (0.0-1.0, inclusive) at or above
         which a train/test pair is flagged as possible leakage.
-    fp_radius
+    fp_radius : int
         Morgan fingerprint radius.
-    fp_n_bits
+    fp_n_bits : int
         Morgan fingerprint bit-vector length.
-    report_output
+    report_output : str | Path | None
         Optional path to also write the full report to. If omitted, the
         report is only returned, not written to disk.
-    report_format
+    report_format : str | None
         ``"json"`` or ``"txt"``. If omitted, it's inferred from
         ``report_output``'s extension (``.txt`` -> ``"txt"``, otherwise
         ``"json"``); has no effect if ``report_output`` is omitted.
-    print_report
+    print_report : bool
         Whether to print the colour-coded summary dashboard to stdout.
 
     Returns
     -------
-    The full report dict (same shape as the CLI's report file/the JSON
-    written by ``report.save_report``), regardless of ``report_output``/
-    ``print_report``.
+    dict
+        The full report dict (same shape as the CLI's report file/the
+        JSON written by ``report.save_report``), regardless of
+        ``report_output``/``print_report``.
     """
     config = Config(
         paths=PathsConfig(
