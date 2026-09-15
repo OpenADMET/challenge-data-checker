@@ -1,0 +1,26 @@
+{
+  "title": "challenge-data-checker: audit ML benchmarking train/test splits for chemical data leakage",
+  "description": "A command-line tool and Python API that audits machine learning benchmarking datasets (train/test splits) for chemical data leakage, duplicates, and data quality issues, using RDKit for structure canonicalisation and similarity comparison.",
+  "upload_type": "software",
+  "creators": [
+    { "name": "OpenADMET" },
+    { "name": "Open Molecular Software Foundation" }
+  ],
+  "license": "Apache-2.0",
+  "access_right": "open",
+  "keywords": [
+    "cheminformatics",
+    "data leakage",
+    "benchmarking",
+    "machine learning",
+    "ADMET",
+    "RDKit"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/OpenADMET/challenge-data-checker",
+      "relation": "isSupplementTo",
+      "scheme": "url"
+    }
+  ]
+}
