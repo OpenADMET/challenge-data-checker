@@ -201,3 +201,13 @@ and our policy on AI-assisted contributions.
 Apache License 2.0 — see [`LICENSE`](LICENSE). See [`CHANGELOG.md`](CHANGELOG.md)
 for release history, and [`CITATION.cff`](CITATION.cff) if you use this tool in
 your work.
+
+## Citing
+
+If this template supports work you publish, please cite it — see [`CITATION.cff`](CITATION.cff) or GitHub's "Cite this repository" button.
+
+## Acknowledgements
+
+We would like to thank our funders for their support of OpenADMET, in particular ARPAH, Radial (part of the Astera Institute (https://ror.org/00ydx1s47)), Schrödinger Inc, and the Gates Foundation.  We would also like to thank our partners Enamine, HuggingFace, OpenEye, CDD Vault, Discovery Life Sciences, and the beamline staff at NSLS-II for their support. 
+
+This work is supported by the Advanced Research Projects Agency for Health (ARPA-H) under AVOID-OME, and Award Number 1AY1AX000035. The contents are those of the authors. They may not reflect the policies of the Department of Health and Human Services or the U.S. government. The content is solely the responsibility of the authors and does not necessarily represent the official views of the Advanced Research Projects Agency for Health.
