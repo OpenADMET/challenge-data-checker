@@ -12,6 +12,7 @@ authors:
   - name: "Open Molecular Software Foundation"
 repository-code: "https://github.com/OpenADMET/challenge-data-checker"
 url: "https://github.com/OpenADMET/challenge-data-checker"
+doi: 10.5281/zenodo.22780114
 license: Apache-2.0
 keywords:
   - cheminformatics

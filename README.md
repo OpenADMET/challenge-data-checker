@@ -2,6 +2,7 @@
 
 [![Tests](https://github.com/OpenADMET/challenge-data-checker/actions/workflows/tests.yml/badge.svg)](https://github.com/OpenADMET/challenge-data-checker/actions/workflows/tests.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22780114.svg)](https://doi.org/10.5281/zenodo.22780114)
 
 A command-line tool that audits machine learning benchmarking datasets
 (train/test splits) for chemical data leakage, duplicates, and data quality
