@@ -28,6 +28,8 @@ def test_load_config_applies_defaults(tmp_path):
     assert config.columns.smiles_column == "SMILES"
     assert config.columns.identifier_columns == ["compound_id"]
     assert config.settings.tautomer_standardisation is False
+    assert config.settings.strip_salts is True
+    assert config.settings.identifier_case_insensitive is False
     assert config.settings.max_train_test_similarity == 1.0
     assert config.settings.fp_radius == 2
     assert config.settings.fp_n_bits == 2048
@@ -38,6 +40,8 @@ def test_load_config_overrides_settings(tmp_path):
     content = BASE_TOML + """
 [settings]
 tautomer_standardisation = true
+strip_salts = false
+identifier_case_insensitive = true
 max_train_test_similarity = 0.85
 fp_radius = 3
 fp_n_bits = 1024
@@ -45,6 +49,8 @@ report_format = "txt"
 """
     config = load_config(write_toml(tmp_path, content))
     assert config.settings.tautomer_standardisation is True
+    assert config.settings.strip_salts is False
+    assert config.settings.identifier_case_insensitive is True
     assert config.settings.max_train_test_similarity == 0.85
     assert config.settings.fp_radius == 3
     assert config.settings.fp_n_bits == 1024

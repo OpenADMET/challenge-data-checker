@@ -5,20 +5,25 @@ as file paths and/or already-loaded pandas DataFrames, mixed freely, and get
 the same report dict the CLI produces, without needing files on disk.
 """
 
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 import pandas as pd
 
 from challenge_data_checker.config import (
+    CheckConfig,
+    CheckPathsConfig,
     ColumnsConfig,
     Config,
     PathsConfig,
     SettingsConfig,
     infer_report_format,
+    parse_settings,
 )
-from challenge_data_checker.core import run_audit
+from challenge_data_checker.core import run_audit, run_check
 from challenge_data_checker.io_utils import DataSource
+from challenge_data_checker.quality_filters import DEFAULT_MULTI_COMPONENT_MIN_HEAVY_ATOMS
+from challenge_data_checker.report_types import CheckReport, Report
 
 # A single train/test argument: one source, or a list of sources (paths and/or
 # DataFrames freely mixed).
@@ -49,13 +54,16 @@ def audit(
     smiles_column: str = "SMILES",
     identifier_columns: Sequence[str] | None = None,
     tautomer_standardisation: bool = False,
+    strip_salts: bool = True,
+    identifier_case_insensitive: bool = False,
+    multi_component_min_heavy_atoms: int = DEFAULT_MULTI_COMPONENT_MIN_HEAVY_ATOMS,
     max_train_test_similarity: float = 1.0,
     fp_radius: int = 2,
     fp_n_bits: int = 2048,
     report_output: str | Path | None = None,
     report_format: str | None = None,
     print_report: bool = True,
-) -> dict:
+) -> Report:
     """Run a challenge-data-checker audit directly from Python.
 
     A code-first alternative to the TOML-config CLI (``challenge-data-checker
@@ -66,8 +74,8 @@ def audit(
     Parameters
     ----------
     train : DataInput
-        Training data: a single .csv/.parquet path or DataFrame, or a list
-        mixing either.
+        Training data: a single data file path (.csv, .tsv, optionally
+        gzipped, or .parquet), URL or DataFrame, or a list mixing these.
     test : DataInput
         Test data, in the same shapes as ``train``.
     smiles_column : str
@@ -78,6 +86,16 @@ def audit(
         leakage/namespace issues.
     tautomer_standardisation : bool
         Whether to canonicalise tautomers before comparing molecules.
+    strip_salts : bool
+        Whether to also compare molecules by their salt- and
+        solvent-stripped parent compound, so a salt in one pool matches
+        its free base (or another salt form) in the other.
+    identifier_case_insensitive : bool
+        Whether identifier values that differ only in letter case count as
+        the same identifier.
+    multi_component_min_heavy_atoms : int
+        Minimum heavy atoms for an unrecognised fragment to count as a
+        separate compound in the ``multi_component`` quality flag.
     max_train_test_similarity : float
         Tanimoto similarity threshold (0.0-1.0, inclusive) at or above
         which a train/test pair is flagged as possible leakage.
@@ -97,10 +115,12 @@ def audit(
 
     Returns
     -------
-    dict
+    Report
         The full report dict (same shape as the CLI's report file/the
         JSON written by ``report.save_report``), regardless of
-        ``report_output``/``print_report``.
+        ``report_output``/``print_report``. ``report["summary"]["status"]``
+        is the overall result: ``"PASS"``, ``"WARN"`` (flagged findings
+        only) or ``"FAIL"`` (blocking findings).
     """
     config = Config(
         paths=PathsConfig(
@@ -114,6 +134,9 @@ def audit(
         ),
         settings=SettingsConfig(
             tautomer_standardisation=tautomer_standardisation,
+            strip_salts=strip_salts,
+            identifier_case_insensitive=identifier_case_insensitive,
+            multi_component_min_heavy_atoms=multi_component_min_heavy_atoms,
             max_train_test_similarity=max_train_test_similarity,
             fp_radius=fp_radius,
             fp_n_bits=fp_n_bits,
@@ -123,3 +146,75 @@ def audit(
     )
 
     return run_audit(config, save=report_output is not None, print_report=print_report)
+
+
+def check(
+    data: DataInput,
+    smiles_column: str = "SMILES",
+    identifier_columns: Sequence[str] | None = None,
+    tautomer_standardisation: bool = False,
+    strip_salts: bool = True,
+    identifier_case_insensitive: bool = False,
+    multi_component_min_heavy_atoms: int = DEFAULT_MULTI_COMPONENT_MIN_HEAVY_ATOMS,
+    report_output: str | Path | None = None,
+    report_format: str | None = None,
+    print_report: bool = True,
+) -> CheckReport:
+    """Check a single dataset, with no train/test split, directly from Python.
+
+    Runs every check that doesn't need a split (unparseable SMILES,
+    duplicates, identifier consistency, quality flags), for example on a
+    dataset before splitting, publishing or accepting it.
+
+    Parameters
+    ----------
+    data : DataInput
+        The dataset: a single data file path, URL or DataFrame, or a list
+        mixing these, pooled into one dataset.
+    smiles_column : str
+        Name of the SMILES column, resolved per source as in ``audit``.
+    identifier_columns : Sequence[str] | None
+        Optional compound identifier column names to check.
+    tautomer_standardisation : bool
+        Whether to canonicalise tautomers before comparing molecules.
+    strip_salts : bool
+        Whether a salt and its free base (or another salt form) count as
+        duplicates of the same compound.
+    identifier_case_insensitive : bool
+        Whether identifier values that differ only in letter case count as
+        the same identifier.
+    multi_component_min_heavy_atoms : int
+        Minimum heavy atoms for an unrecognised fragment to count as a
+        separate compound in the ``multi_component`` quality flag.
+    report_output : str | Path | None
+        Optional path to also write the full report to.
+    report_format : str | None
+        ``"json"`` or ``"txt"``; inferred from ``report_output`` if
+        omitted.
+    print_report : bool
+        Whether to print the colour-coded summary dashboard to stdout.
+
+    Returns
+    -------
+    CheckReport
+        The full check report. ``report["summary"]["status"]`` is the
+        overall result: ``"PASS"``, ``"WARN"`` or ``"FAIL"``.
+    """
+    settings_raw: dict[str, object] = {
+        "tautomer_standardisation": tautomer_standardisation,
+        "strip_salts": strip_salts,
+        "identifier_case_insensitive": identifier_case_insensitive,
+        "multi_component_min_heavy_atoms": multi_component_min_heavy_atoms,
+    }
+    if report_format is not None:
+        settings_raw["report_format"] = report_format
+    config = CheckConfig(
+        paths=CheckPathsConfig(files=_as_source_list(data), report_output=report_output),
+        columns=ColumnsConfig(
+            smiles_column=smiles_column,
+            identifier_columns=list(identifier_columns) if identifier_columns else [],
+        ),
+        settings=parse_settings(settings_raw, report_output),
+        config_path=None,
+    )
+    return run_check(config, save=report_output is not None, print_report=print_report)

@@ -3,6 +3,10 @@
 from dataclasses import dataclass, field
 from typing import Any
 
+from challenge_data_checker.parse_errors import ParseErrorCategory
+from challenge_data_checker.quality_filters import FragmentKind
+from challenge_data_checker.report_types import Location
+
 Fingerprint = Any  # rdkit.DataStructs.cDataStructs.ExplicitBitVect
 
 
@@ -21,17 +25,41 @@ class MoleculeRecord:
     raw_smiles : str
         The raw SMILES string as read from the input file.
     identifiers : dict[str, str | None]
-        Mapping of identifier column name to its value for this row
-        (``None`` if the column was absent or the cell was empty).
+        Mapping of identifier column name to its normalised value for this
+        row, the value every identifier check compares: surrounding
+        whitespace stripped, and casefolded if the
+        ``identifier_case_insensitive`` setting is on. ``None`` if the
+        column was absent or the cell was empty.
+    raw_identifiers : dict[str, str | None]
+        The identifier values exactly as read from the input file.
     parse_error : str | None
-        Description of why parsing/processing failed, or ``None`` if the
-        row was processed successfully.
+        Description of why parsing/processing failed (RDKit's own message
+        where available), or ``None`` if the row was processed successfully.
+    parse_error_category : ParseErrorCategory | None
+        The failure's likely root cause (see
+        ``parse_errors.classify_parse_failure``), or ``None`` on success.
+    rdkit_warning : str | None
+        A warning RDKit logged while parsing a SMILES that did parse, or
+        ``None``.
+    smiles_whitespace_recovered : bool
+        Whether the SMILES only parsed after stripping leading/trailing
+        whitespace.
     canonical_smiles : str | None
         RDKit canonical SMILES, or ``None`` if unparsed.
     inchikey : str | None
         InChIKey, or ``None`` if unparsed or InChIKey generation failed.
     fingerprint : Fingerprint | None
         Stereo-blind Morgan fingerprint, or ``None`` if unparsed.
+    parent_smiles : str | None
+        Canonical SMILES of the neutralised parent compound once known
+        counterions and solvents are stripped (see
+        ``quality_filters.classify_fragments``), or ``None`` if unparsed.
+    parent_inchikey : str | None
+        InChIKey of the parent compound, or ``None`` if unparsed or
+        InChIKey generation failed.
+    stripped_fragments : list[tuple[str, FragmentKind]]
+        Canonical SMILES and kind (``"counterion"``, ``"solvent"`` or
+        ``"unknown"``) of every fragment other than the parent.
     heavy_atom_count : int | None
         Number of heavy atoms, or ``None`` if unparsed.
     num_fragments : int | None
@@ -43,7 +71,22 @@ class MoleculeRecord:
     is_mixture : bool
         Whether the molecule has multiple disconnected fragments.
     is_salt_or_metal : bool
-        Whether the molecule is a salt or metal complex.
+        Whether the molecule is a salt, solvate or metal complex.
+    is_salt_or_solvate : bool
+        Whether the molecule is a parent compound plus only known
+        counterions, solvents and copies of itself.
+    is_multi_component : bool
+        Whether it holds two or more distinct unrecognised compounds.
+    is_homodimer_without_counterion : bool
+        Whether it is two or more copies of one compound and nothing else.
+    is_unclassified_mixture : bool
+        Whether it has several fragments that none of the above explains.
+    net_charge : int | None
+        Sum of formal charges as drawn, or ``None`` if unparsed.
+    undefined_stereocentres : int
+        Stereocentres whose configuration the SMILES leaves unspecified.
+    undefined_stereo_bonds : int
+        Stereo double bonds whose configuration is unspecified.
     is_suspicious_fragment : bool
         Whether the molecule looks like a stripped degradation artefact
         (e.g. a bare counterion).
@@ -54,11 +97,18 @@ class MoleculeRecord:
     row_index: int
     raw_smiles: str
     identifiers: dict[str, str | None] = field(default_factory=dict)
+    raw_identifiers: dict[str, str | None] = field(default_factory=dict)
 
     parse_error: str | None = None
+    parse_error_category: ParseErrorCategory | None = None
+    rdkit_warning: str | None = None
+    smiles_whitespace_recovered: bool = False
     canonical_smiles: str | None = None
     inchikey: str | None = None
     fingerprint: Fingerprint | None = None
+    parent_smiles: str | None = None
+    parent_inchikey: str | None = None
+    stripped_fragments: list[tuple[str, FragmentKind]] = field(default_factory=list)
 
     heavy_atom_count: int | None = None
     num_fragments: int | None = None
@@ -66,6 +116,13 @@ class MoleculeRecord:
     contains_metal: bool = False
     is_mixture: bool = False
     is_salt_or_metal: bool = False
+    is_salt_or_solvate: bool = False
+    is_multi_component: bool = False
+    is_homodimer_without_counterion: bool = False
+    is_unclassified_mixture: bool = False
+    net_charge: int | None = None
+    undefined_stereocentres: int = 0
+    undefined_stereo_bonds: int = 0
     is_suspicious_fragment: bool = False
 
     @property
@@ -79,12 +136,12 @@ class MoleculeRecord:
         """
         return self.parse_error is None
 
-    def location(self) -> dict[str, object]:
+    def location(self) -> Location:
         """Build a compact reference to where this row came from, for reports.
 
         Returns
         -------
-        dict[str, object]
+        Location
             A dict with the pool, source file, row index, and raw SMILES.
         """
         return {

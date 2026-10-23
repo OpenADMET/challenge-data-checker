@@ -1,15 +1,27 @@
 import json
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from challenge_data_checker.config import Config, ColumnsConfig, PathsConfig, SettingsConfig
+from challenge_data_checker.chemistry import MoleculeProcessor
+from challenge_data_checker.config import ColumnsConfig, Config, PathsConfig, SettingsConfig
 from challenge_data_checker.models import MoleculeRecord
 from challenge_data_checker.report import (
     build_report,
     format_report_as_text,
     print_summary,
     save_report,
+)
+from challenge_data_checker.report_types import (
+    QUALITY_FLAG_CATEGORIES,
+    REPRESENTATIONS,
+    InternalDuplicates,
+    NamespaceIssues,
+    QualityFlags,
+    Report,
+    ReportConfig,
+    Summary,
+    TrainTestLeakage,
 )
 
 
@@ -66,6 +78,32 @@ def test_build_report_contains_expected_top_level_keys(tmp_path):
     assert report["config"]["report_format"] == "json"
 
 
+def test_build_report_keys_match_typed_schema(tmp_path):
+    # mypy only checks the code that builds the report; this guards the
+    # TypedDict schema against drifting from what's actually emitted.
+    config = make_config(tmp_path)
+    train = [
+        make_record("train", 0, "CCO", "CCO", "IK1", {"compound_id": "C1"}),
+        make_record("train", 1, "CCO", "CCO", "IK1", {"compound_id": "C1"}),
+    ]
+    test = [make_record("test", 0, "CCO", "CCO", "IK1", {"compound_id": "C1"})]
+
+    report = build_report(config, train, test, ["compound_id"])
+
+    assert set(report) == set(Report.__annotations__)
+    assert set(report["config"]) == set(ReportConfig.__annotations__)
+    assert set(report["summary"]) == set(Summary.__annotations__)
+    assert set(report["train_test_leakage"]) == set(TrainTestLeakage.__annotations__)
+    for pool in ("train", "test"):
+        assert set(report["internal_duplicates"][pool]) == set(InternalDuplicates.__annotations__)
+        assert set(report["quality_flags"][pool]) == set(QualityFlags.__annotations__)
+    assert set(report["internal_duplicates"]["train"]) == {*REPRESENTATIONS, "identifiers"}
+    assert set(report["quality_flags"]["train"]) == set(QUALITY_FLAG_CATEGORIES)
+    assert set(report["identifier_namespace_issues"]["compound_id"]) == set(
+        NamespaceIssues.__annotations__
+    )
+
+
 def test_build_report_records_resolved_smiles_columns(tmp_path):
     config = make_config(tmp_path)
 
@@ -93,13 +131,14 @@ def test_build_report_resolved_smiles_columns_defaults_to_empty(tmp_path):
 
 def test_build_report_generated_at_is_a_valid_recent_timestamp(tmp_path):
     config = make_config(tmp_path)
-    before = datetime.now().astimezone().replace(microsecond=0)
+    before = datetime.now(UTC).replace(microsecond=0)
 
     report = build_report(config, [], [], [])
 
-    after = datetime.now().astimezone()
+    after = datetime.now(UTC)
     generated_at = datetime.fromisoformat(report["generated_at"])
     assert before <= generated_at <= after
+    assert generated_at.utcoffset() == timedelta(0)
 
 
 def test_save_report_writes_valid_json(tmp_path):
@@ -200,3 +239,49 @@ def test_print_summary_runs_without_error(tmp_path, capsys):
     assert "challenge-data-checker audit summary" in captured.out
     assert "Rows processed" in captured.out
     assert report["generated_at"] in captured.out
+
+
+def test_build_report_counts_stereo_only_overlap_separately(tmp_path):
+    # Train has L-alanine; test has L-alanine (exact) and the racemate
+    # (same connectivity, different stereo): one exact and one stereo-only
+    # test row, and the train row only counts as exact.
+    processor = MoleculeProcessor(SettingsConfig())
+    train = [processor.process_row("train", "train.csv", 0, "C[C@H](N)C(=O)O", {})]
+    test = [
+        processor.process_row("test", "test.csv", 0, "C[C@H](N)C(=O)O", {}),
+        processor.process_row("test", "test.csv", 1, "CC(N)C(=O)O", {}),
+    ]
+
+    report = build_report(make_config(tmp_path), train, test, [])
+
+    s = report["summary"]
+    assert (s["total_exact_leaked_train_molecules"], s["total_exact_leaked_test_molecules"]) == (
+        1,
+        1,
+    )
+    assert (s["total_stereo_leaked_train_molecules"], s["total_stereo_leaked_test_molecules"]) == (
+        0,
+        1,
+    )
+    text = format_report_as_text(report)
+    stereo_section = text.split("Same Connectivity, Different Stereochemistry")[1]
+    assert "'CC(N)C(=O)O'" in stereo_section.split("Tanimoto")[0]
+
+
+def test_build_report_counts_salt_form_only_overlap_separately(tmp_path):
+    processor = MoleculeProcessor(SettingsConfig())
+    train = [processor.process_row("train", "train.csv", 0, "CCN(CC)CC.Cl", {})]
+    test = [processor.process_row("test", "test.csv", 0, "CCN(CC)CC", {})]
+
+    report = build_report(make_config(tmp_path), train, test, [])
+
+    s = report["summary"]
+    assert s["total_exact_leaked_test_molecules"] == 0
+    assert s["total_salt_form_leaked_train_molecules"] == 1
+    assert s["total_salt_form_leaked_test_molecules"] == 1
+    assert s["total_stereo_leaked_test_molecules"] == 0
+    assert report["config"]["strip_salts"] is True
+    text = format_report_as_text(report)
+    salt_section = text.split("Same Parent Compound, Different Salt Form")[1].split("Same Conn")[0]
+    assert "'CCN(CC)CC.Cl'" in salt_section
+    assert "strip_salts              : True" in text

@@ -1,8 +1,10 @@
 import json
+from importlib.metadata import version
 
 import pandas as pd
 import pytest
 
+import challenge_data_checker
 from challenge_data_checker import audit
 from challenge_data_checker.api import audit as audit_from_module
 
@@ -28,6 +30,10 @@ def train_test_dfs():
 
 def test_audit_is_exported_from_package_root():
     assert audit is audit_from_module
+
+
+def test_version_matches_installed_package_metadata():
+    assert challenge_data_checker.__version__ == version("challenge-data-checker")
 
 
 def test_audit_accepts_dataframes_directly(train_test_dfs):
@@ -147,3 +153,15 @@ def test_audit_single_dataframe_and_single_path_are_not_required_to_be_lists(
 
     assert report["summary"]["total_train_rows"] == 3
     assert report["summary"]["total_test_rows"] == 3
+
+
+def test_audit_strip_salts_flag_controls_parent_matching():
+    train = pd.DataFrame({"SMILES": ["CCN(CC)CC.Cl"]})
+    test = pd.DataFrame({"SMILES": ["CCN(CC)CC"]})
+
+    on = audit(train=train, test=test, print_report=False)
+    off = audit(train=train, test=test, strip_salts=False, print_report=False)
+
+    assert len(on["train_test_leakage"]["exact"]["parent_inchikey"]) == 1
+    assert off["train_test_leakage"]["exact"]["parent_inchikey"] == []
+    assert off["config"]["strip_salts"] is False

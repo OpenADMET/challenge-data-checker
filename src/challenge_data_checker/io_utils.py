@@ -1,12 +1,12 @@
 """File loading, pooling, and fuzzy column resolution."""
 
 import logging
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 import pandas as pd
 
-from challenge_data_checker.remote import is_remote_source, resolve_remote_source
+from challenge_data_checker.remote import fetch_remote_source, is_remote_source
 
 logger = logging.getLogger(__name__)
 
@@ -16,15 +16,26 @@ logger = logging.getLogger(__name__)
 type DataSource = str | Path | pd.DataFrame
 
 # Known alternate names for a SMILES column, used only when neither an exact
-# nor a case-insensitive match to the configured name is found.
-SMILES_COLUMN_ALIASES = {
+# nor a case-insensitive match to the configured name is found. Ordered by
+# preference: if a file has several, the earliest one in this tuple wins.
+SMILES_COLUMN_ALIASES = (
     "smiles",
+    "canonical_smiles",
+    "standardized_smiles",
+    "standardised_smiles",
+    "std_smiles",
+    "isomeric_smiles",
+    "cxsmiles",
     "smi",
     "structure",
-    "canonical_smiles",
     "molecule",
     "mol",
-}
+)
+
+# Supported data file extensions, matched case-insensitively against the end
+# of the file name. Delimited text may also be gzip-compressed (pandas infers
+# the compression from the ".gz" extension).
+SUPPORTED_FILE_EXTENSIONS = (".csv", ".csv.gz", ".tsv", ".tsv.gz", ".parquet")
 
 SOURCE_FILE_COL = "__source_file__"
 ROW_INDEX_COL = "__row_index__"
@@ -36,12 +47,12 @@ class ColumnResolutionError(ValueError):
 
 
 def load_table(path: str | Path) -> pd.DataFrame:
-    """Load a .csv or .parquet file into a DataFrame.
+    """Load a .csv, .tsv (optionally gzipped) or .parquet file into a DataFrame.
 
     Parameters
     ----------
     path : str | Path
-        Path to a .csv or .parquet data file.
+        Path to a data file with one of ``SUPPORTED_FILE_EXTENSIONS``.
 
     Returns
     -------
@@ -58,12 +69,17 @@ def load_table(path: str | Path) -> pd.DataFrame:
     path = Path(path)
     if not path.is_file():
         raise FileNotFoundError(f"Input data file not found: {path}")
-    suffix = path.suffix.lower()
-    if suffix == ".csv":
+    name = path.name.lower()
+    if name.endswith((".csv", ".csv.gz")):
         return pd.read_csv(path)
-    if suffix == ".parquet":
+    if name.endswith((".tsv", ".tsv.gz")):
+        return pd.read_csv(path, sep="\t")
+    if name.endswith(".parquet"):
         return pd.read_parquet(path)
-    raise ValueError(f"Unsupported file format '{suffix}' for {path}. Use .csv or .parquet.")
+    raise ValueError(
+        f"Unsupported file format '{''.join(path.suffixes)}' for {path}. "
+        f"Use one of: {', '.join(SUPPORTED_FILE_EXTENSIONS)}."
+    )
 
 
 def describe_source(source: DataSource, index: int) -> str:
@@ -101,11 +117,13 @@ def resolve_smiles_column(
     Resolution order:
         1. Exact match to ``configured_name``.
         2. Case-insensitive match to ``configured_name``.
-        3. A unique column whose lowercased name is in ``SMILES_COLUMN_ALIASES``.
+        3. A column whose lowercased name is in ``SMILES_COLUMN_ALIASES``,
+           preferring the alias listed earliest when several are present.
 
     Falling back to an alias match (step 3) is logged as a warning, since it
     means the configured column name wasn't found at all and a different
-    column is being audited in its place.
+    column is being audited in its place. The warning also names any other
+    alias columns that were passed over.
 
     Parameters
     ----------
@@ -125,8 +143,8 @@ def resolve_smiles_column(
     Raises
     ------
     ColumnResolutionError
-        If no single column can be unambiguously resolved as the SMILES
-        column.
+        If no column can be resolved as the SMILES column, or the chosen
+        name matches more than one column case-insensitively.
     """
     if configured_name in columns:
         return configured_name
@@ -146,23 +164,28 @@ def resolve_smiles_column(
         )
 
     alias_candidates = [col for col in columns if col.lower() in SMILES_COLUMN_ALIASES]
-    if len(alias_candidates) == 1:
-        resolved = alias_candidates[0]
+    for alias in SMILES_COLUMN_ALIASES:
+        matches = lower_map.get(alias, [])
+        if not matches:
+            continue
+        if len(matches) > 1:
+            raise ColumnResolutionError(
+                f"Could not uniquely resolve SMILES column '{configured_name}': "
+                f"multiple columns match the alias '{alias}' case-insensitively: {matches}. "
+                "Please set 'smiles_column' explicitly to the exact column name."
+            )
+        resolved = matches[0]
+        passed_over = [col for col in alias_candidates if col != resolved]
         logger.warning(
-            "SMILES column '%s' not found in %s; falling back to alias match '%s'. "
+            "SMILES column '%s' not found in %s; falling back to alias match '%s'%s. "
             "Set 'smiles_column' explicitly to silence this warning if that's intended.",
             configured_name,
             source_label,
             resolved,
+            f" (preferred over {passed_over})" if passed_over else "",
         )
         return resolved
 
-    if len(alias_candidates) > 1:
-        raise ColumnResolutionError(
-            f"Could not uniquely resolve SMILES column '{configured_name}': "
-            f"multiple candidate columns found via fuzzy matching: {alias_candidates}. "
-            "Please set 'smiles_column' explicitly to the exact column name."
-        )
     raise ColumnResolutionError(
         f"Could not find SMILES column '{configured_name}' (or a case-insensitive/alias "
         f"match) among available columns: {columns}."
@@ -222,9 +245,9 @@ def load_pool(
     Parameters
     ----------
     sources : Sequence[DataSource]
-        Paths to .csv/.parquet files, URLs to remote .csv/.parquet files
-        (HuggingFace Hub or plain HTTP(S)), and/or already-loaded
-        DataFrames to load (if needed) and pool together.
+        Paths to local data files, URLs to remote data files (HuggingFace
+        Hub or plain HTTP(S)), and/or already-loaded DataFrames to load (if
+        needed) and pool together. See ``SUPPORTED_FILE_EXTENSIONS``.
     smiles_column : str
         The configured SMILES column name to resolve in each source.
     identifier_columns : list[str]
@@ -248,13 +271,11 @@ def load_pool(
     for i, source in enumerate(sources):
         if isinstance(source, pd.DataFrame):
             df = source.copy()
+        elif isinstance(source, str) and is_remote_source(source):
+            with fetch_remote_source(source) as local_path:
+                df = load_table(local_path)
         else:
-            local_path = (
-                resolve_remote_source(source)
-                if isinstance(source, str) and is_remote_source(source)
-                else source
-            )
-            df = load_table(local_path)
+            df = load_table(source)
         label = describe_source(source, i)
         resolved_smiles_col = resolve_smiles_column(list(df.columns), smiles_column, label)
         resolved_smiles_columns[label] = resolved_smiles_col

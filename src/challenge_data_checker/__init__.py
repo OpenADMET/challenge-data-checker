@@ -1,7 +1,9 @@
 """challenge-data-checker: audit ML benchmarking train/test splits for chemical data leakage."""
 
-from challenge_data_checker.api import audit
+from importlib.metadata import version
 
-__version__ = "0.3.3"
+from challenge_data_checker.api import audit, check
 
-__all__ = ["audit", "__version__"]
+__version__ = version("challenge-data-checker")
+
+__all__ = ["__version__", "audit", "check"]

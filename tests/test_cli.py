@@ -77,13 +77,15 @@ def test_run_end_to_end_report_contents(mock_dataset):
 
     # quality filters:
     # - mixtures: the diacetic acid dimer and NaCl (both contain a ".") -> 2
-    # - salts/metals: NaCl (metal) and the bare cyanide (matches the counterion
-    #   list used to catch stripped-metal-complex artefacts) -> 2
-    # - suspicious tiny fragments: both CCO rows + the bare cyanide (<=3 heavy atoms) -> 3
+    # - salts/metals: NaCl (metal) -> 1. The bare cyanide is a lone fragment
+    #   (a suspicious fragment, not a salt), and the diacetic acid dimer has no
+    #   parent compound, only counterion-like fragments.
+    # - suspicious tiny fragments: only the bare cyanide; ethanol (CCO) is on
+    #   the small-molecule allowlist -> 1
     quality_train = report["quality_flags"]["train"]
     assert len(quality_train["mixtures"]) == 2
-    assert len(quality_train["salts_or_metal_complexes"]) == 2
-    assert len(quality_train["suspicious_fragments"]) == 3
+    assert len(quality_train["salts_or_metal_complexes"]) == 1
+    assert len(quality_train["suspicious_fragments"]) == 1
 
     # report file written to disk
     report_output = mock_dataset / "report.json"
@@ -97,9 +99,41 @@ def test_main_prints_dashboard(mock_dataset, capsys):
     exit_code = main([str(config_path)])
     captured = capsys.readouterr()
 
-    assert exit_code == 0
+    # The fixture has train/test leakage, a blocking finding.
+    assert exit_code == 2
     assert "challenge-data-checker audit summary" in captured.out
     assert "Rows processed" in captured.out
+    assert "OVERALL FAIL" in captured.out
+
+
+def _write_pair(tmp_path, train_smiles, test_smiles):
+    (tmp_path / "train.csv").write_text("SMILES\n" + "\n".join(train_smiles) + "\n")
+    (tmp_path / "test.csv").write_text("SMILES\n" + "\n".join(test_smiles) + "\n")
+    config = tmp_path / "config.toml"
+    config.write_text(f"""[paths]
+train_files = ["{tmp_path / "train.csv"}"]
+test_files = ["{tmp_path / "test.csv"}"]
+report_output = "{tmp_path / "report.json"}"
+
+[columns]
+smiles_column = "SMILES"
+""")
+    return str(config)
+
+
+@pytest.mark.parametrize(
+    ("train", "test", "strict", "expected"),
+    [
+        (["c1ccccc1CCN"], ["c1ccccc1CCO"], False, 0),  # PASS
+        (["c1ccccc1CCN"], ["c1ccccc1CCO"], True, 0),  # PASS, strict
+        (["c1ccccc1CCN", "c1ccccc1CCN"], ["c1ccccc1CCO"], False, 0),  # WARN: train duplicate
+        (["c1ccccc1CCN", "c1ccccc1CCN"], ["c1ccccc1CCO"], True, 2),  # WARN, strict
+        (["c1ccccc1CCN"], ["c1ccccc1CCN"], False, 2),  # FAIL: exact overlap
+    ],
+)
+def test_main_exit_code_follows_status(tmp_path, capsys, train, test, strict, expected):
+    argv = [_write_pair(tmp_path, train, test)] + (["--strict"] if strict else [])
+    assert main(argv) == expected
 
 
 def test_main_returns_error_code_for_bad_config(tmp_path, capsys):

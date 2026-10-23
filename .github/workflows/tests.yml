@@ -66,3 +66,52 @@ jobs:
           name: coverage-report
           path: .coverage
           if-no-files-found: ignore
+
+  # The job above checks the exact pinned development environment. These two
+  # check both ends of the dependency ranges declared in pyproject.toml, using
+  # PyPI wheels: the newest releases on every supported Python, and the
+  # declared floors on the oldest Python.
+  test-latest:
+    name: pytest (Python ${{ matrix.python-version }}, latest dependencies)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13", "3.14", "3.15"]
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up uv and Python ${{ matrix.python-version }}
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          python-version: ${{ matrix.python-version }}
+          activate-environment: true
+
+      - name: Install package
+        run: uv pip install -e ".[parquet,test,remote]"
+
+      - name: Run tests
+        run: pytest
+
+  test-minimum-versions:
+    name: pytest (Python 3.12, minimum dependency versions)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up uv and Python 3.12
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          python-version: "3.12"
+          activate-environment: true
+
+      - name: Install package at its declared dependency floors
+        # lowest-direct resolves each direct dependency (including extras) to
+        # the lowest version pyproject.toml allows, so this job fails if a
+        # declared floor is no longer actually compatible.
+        run: uv pip install --resolution lowest-direct -e ".[parquet,test,remote]"
+
+      - name: Run tests
+        run: pytest
