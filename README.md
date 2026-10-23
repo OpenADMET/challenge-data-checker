@@ -39,6 +39,9 @@ issues. Built for sequential processing of datasets up to ~10,000 molecules.
   or test-only), per representation (including stereoisomers and
   racemate/enantiomer pairs, via the InChIKey connectivity block) and per
   identifier column.
+- **Inconsistent SMILES**: flags a structure written as two or more
+  different SMILES strings, and which files use which form, a sign that the
+  data went through different processing pipelines.
 - **Identifier namespace checks**: flags an identifier that maps to more than
   one structure, or a compound that's given more than one identifier, within
   the same identifier column. Each identifier conflict is classified as
@@ -55,7 +58,8 @@ issues. Built for sequential processing of datasets up to ~10,000 molecules.
 - **Quality filters**: multi-fragment entries are split by what they are:
   - **salt or solvate:** a parent compound plus known counterions or
     solvents, drawn either ionic or neutral (e.g. `.[Cl-]` or `.Cl`, TFA,
-    mesylate, maleate, citrate, hydrates, common crystallisation solvents),
+    mesylate, esylate, isethionate, triflate, maleate, citrate, hydrates,
+    common crystallisation solvents),
     and possibly further copies of the parent, as in a 2:1 salt
   - **multi-component:** two or more distinct unrecognised compounds of at
     least `multi_component_min_heavy_atoms` heavy atoms, e.g. two drugs
@@ -336,6 +340,7 @@ otherwise. Four rules decide the tier:
 | Finding | Train | Test | Train/test |
 |---|---|---|---|
 | Unparseable SMILES | FAIL | FAIL | |
+| Same structure written as different SMILES strings (e.g. different processing pipelines) | | | WARN |
 | Exact overlap (raw / canonical SMILES, InChIKey) | | | FAIL |
 | Same parent compound, different salt form (`strip_salts`) | | | FAIL |
 | Identifier overlap | | | FAIL |
@@ -348,8 +353,8 @@ otherwise. Four rules decide the tier:
 | One compound (any salt form or stereo) → several identifiers | | | WARN |
 | Identifier with surrounding whitespace; near-duplicate identifiers (case or `-`/`_` only) | | | WARN |
 | Identifier with valid and unparseable SMILES; empty SMILES resolvable via its identifier | | | WARN (the unparseable rows themselves still FAIL) |
-| Homodimer without counterion; net formal charge ≠ 0 | FAIL | FAIL | |
-| Salt or solvate, contains metal, multi-component, other mixtures, suspicious fragments, undefined stereochemistry | WARN | WARN | |
+| Homodimer without counterion | FAIL | FAIL | |
+| Salt or solvate, contains metal, multi-component, other mixtures, net formal charge ≠ 0 (missing counterion), suspicious fragments, undefined stereochemistry | WARN | WARN | |
 | SMILES that only parses after stripping whitespace; RDKit parse warnings | WARN | WARN | |
 
 Counts are of distinct problems and rows, not of checks that fired: a

@@ -291,6 +291,27 @@ class QualityFlags(TypedDict):
     rdkit_warnings: list[RdkitWarningEntry]
 
 
+class SmilesRepresentation(TypedDict):
+    """One SMILES string used for a structure, and where it appears."""
+
+    raw_smiles: str
+    source_files: list[str]
+    occurrences: list[Location]
+
+
+class InconsistentSmiles(TypedDict):
+    """A structure written as two or more different SMILES strings.
+
+    Typically data that went through different processing pipelines (e.g.
+    different canonicalisation or toolkits). ``source_files`` on each
+    representation shows which inputs use which form.
+    """
+
+    canonical_smiles: str | None
+    inchikey: str
+    representations: list[SmilesRepresentation]
+
+
 class NamespaceIssueCounts(TypedDict):
     """Finding counts for one identifier column's namespace checks."""
 
@@ -340,6 +361,7 @@ class Summary(TypedDict):
     total_unparseable_test: int
     total_unparseable_by_category: dict[str, int]
     total_unparseable_resolvable_via_identifier: int
+    total_inconsistent_smiles: int
     total_exact_leaked_train_molecules: int
     total_exact_leaked_test_molecules: int
     total_salt_form_leaked_train_molecules: int
@@ -385,6 +407,7 @@ class Report(TypedDict):
     config: ReportConfig
     summary: Summary
     unparseable_smiles: list[UnparseableEntry]
+    inconsistent_smiles: list[InconsistentSmiles]
     train_test_leakage: TrainTestLeakage
     internal_duplicates: PerPool[InternalDuplicates]
     identifier_namespace_issues: dict[str, NamespaceIssues]
@@ -401,6 +424,7 @@ class CheckSummary(TypedDict):
     total_unparseable: int
     total_unparseable_by_category: dict[str, int]
     total_unparseable_resolvable_via_identifier: int
+    total_inconsistent_smiles: int
     total_internal_duplicates: dict[str, int]
     total_internal_duplicates_identifiers: dict[str, int]
     total_identifier_namespace_issues: dict[str, NamespaceIssueCounts]
@@ -434,6 +458,7 @@ class CheckReport(TypedDict):
     config: CheckReportConfig
     summary: CheckSummary
     unparseable_smiles: list[UnparseableEntry]
+    inconsistent_smiles: list[InconsistentSmiles]
     internal_duplicates: InternalDuplicates
     identifier_namespace_issues: dict[str, NamespaceIssues]
     quality_flags: QualityFlags

@@ -28,6 +28,7 @@ from challenge_data_checker.report_types import (
     REPRESENTATIONS,
     SALT_FORM_INSENSITIVE_REPRESENTATIONS,
     STEREO_INSENSITIVE_REPRESENTATIONS,
+    InconsistentSmiles,
     InternalDuplicates,
     LeakageFinding,
     Location,
@@ -86,6 +87,8 @@ TIERS: dict[str, TierRule] = {
     "tanimoto_similarity": lambda ctx: (
         Severity.WARN if ctx.max_train_test_similarity >= 1.0 else Severity.FAIL
     ),
+    # The same structure written differently, e.g. by two processing pipelines
+    "inconsistent_smiles": Severity.WARN,
     # Data curation within a pool (rule 2)
     "duplicate_structure": _TRAIN_WARN_TEST_FAIL,
     "duplicate_salt_form": _TRAIN_WARN_TEST_FAIL,
@@ -99,10 +102,13 @@ TIERS: dict[str, TierRule] = {
     "identifier_near_duplicate": Severity.WARN,
     "id_with_unparseable_and_valid_structures": Severity.WARN,
     "missing_structure_resolvable_by_id": Severity.WARN,
-    # Broken structures (rule 1): a 2:1 salt with its counterion stripped, or
-    # a charged entry with its counterion stripped.
+    # Broken structure (rule 1): a 2:1 salt with its counterion stripped, so the
+    # stoichiometry is wrong.
     "homodimer_without_counterion": Severity.FAIL,
-    "net_charge": Severity.FAIL,
+    # A charged entry drawn without its counterion (e.g. a sodium salt drawn
+    # as the bare anion, or a quaternary ammonium without its anion). The
+    # parent is usually correct, so this is a representation problem.
+    "net_charge": Severity.WARN,
     # Heuristic quality flags (rule 4)
     "salt_or_solvate": Severity.WARN,
     "contains_metal": Severity.WARN,
@@ -266,6 +272,7 @@ def collect_findings(
     internal_duplicates: dict[Pool, InternalDuplicates],
     namespace_issues: dict[str, NamespaceIssues],
     quality_flags: dict[Pool, QualityFlags],
+    inconsistent: list[InconsistentSmiles],
 ) -> Iterator[Finding]:
     """Reduce every check's results to typed findings with their rows.
 
@@ -285,6 +292,8 @@ def collect_findings(
         The report's ``identifier_namespace_issues``.
     quality_flags : dict[Pool, QualityFlags]
         Quality flags for each pool.
+    inconsistent : list[InconsistentSmiles]
+        The report's ``inconsistent_smiles``.
 
     Yields
     ------
@@ -293,6 +302,11 @@ def collect_findings(
     """
     for entry in unparseable:
         yield Finding("unparseable_smiles", None, _rows([entry]))
+    for structure in inconsistent:
+        rows = frozenset(
+            _row_key(loc) for rep in structure["representations"] for loc in rep["occurrences"]
+        )
+        yield Finding("inconsistent_smiles", None, rows)
 
     for representation, leaks in exact_leakage.items():
         for leak in leaks:

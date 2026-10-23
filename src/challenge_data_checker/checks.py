@@ -17,6 +17,7 @@ from challenge_data_checker.report_types import (
     IdentifierOccurrences,
     IdentifierWhitespaceEntry,
     IdWithUnparseableAndValidStructures,
+    InconsistentSmiles,
     InternalDuplicates,
     LeakageFinding,
     MissingStructureResolvableById,
@@ -63,6 +64,51 @@ def unparseable_entries(records: list[MoleculeRecord]) -> list[UnparseableEntry]
         for r in records
         if r.parse_error is not None
     ]
+
+
+def inconsistent_smiles(records: list[MoleculeRecord]) -> list[InconsistentSmiles]:
+    """Find structures written as two or more different SMILES strings.
+
+    Rows are grouped by full InChIKey (the same structure, stereochemistry
+    included), and a group is reported when its raw SMILES strings, with
+    surrounding whitespace stripped, differ. That usually means the data
+    went through different processing pipelines, which RDKit's own
+    canonicalisation would otherwise hide.
+
+    Parameters
+    ----------
+    records : list[MoleculeRecord]
+        Records from every pool and file.
+
+    Returns
+    -------
+    list[InconsistentSmiles]
+        One finding per such structure, listing each SMILES string with the
+        files and rows that use it.
+    """
+    by_structure = _index_by([r for r in records if r.is_parsed], lambda r: r.inchikey)
+    findings: list[InconsistentSmiles] = []
+    for inchikey, recs in sorted(by_structure.items()):
+        by_smiles: dict[str, list[MoleculeRecord]] = defaultdict(list)
+        for r in recs:
+            by_smiles[r.raw_smiles.strip()].append(r)
+        if len(by_smiles) < 2:
+            continue
+        findings.append(
+            {
+                "canonical_smiles": recs[0].canonical_smiles,
+                "inchikey": inchikey,
+                "representations": [
+                    {
+                        "raw_smiles": smiles,
+                        "source_files": sorted({r.source_file for r in rows}),
+                        "occurrences": [r.location() for r in rows],
+                    }
+                    for smiles, rows in sorted(by_smiles.items())
+                ],
+            }
+        )
+    return findings
 
 
 def _index_by(records: list[MoleculeRecord], key_func: KeyFunc) -> dict[str, list[MoleculeRecord]]:

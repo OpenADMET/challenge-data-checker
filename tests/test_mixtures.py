@@ -94,7 +94,9 @@ def _report(smiles):
     ("smiles", "status", "finding_type"),
     [
         ("CCN.CCN", "FAIL", "homodimer_without_counterion"),
-        ("CC(=O)[O-].CC(=O)[O-]", "FAIL", "net_charge"),
+        # A missing counterion is a representation problem: flagged, not blocking.
+        ("CC(=O)[O-].CC(=O)[O-]", "WARN", "net_charge"),
+        ("C[N+](C)(C)CCCCCCCCCCCC", "WARN", "net_charge"),  # quaternary, no anion
         (f"{IBUPROFEN}.{NICOTINE}", "WARN", "multi_component"),
         ("c1ccccc1CCN.Cl", "WARN", "salt_or_solvate"),
         ("C[Hg]Cl", "WARN", "contains_metal"),
@@ -134,3 +136,11 @@ multi_component_min_heavy_atoms = 0
 """)
     with pytest.raises(ConfigError, match="multi_component_min_heavy_atoms"):
         load_config(config)
+
+
+@pytest.mark.parametrize(
+    "counterion",
+    ["CCS(=O)(=O)O", "OCCS(=O)(=O)O", "OS(=O)(=O)C(F)(F)F", "OC(=O)c1cc(S(=O)(=O)O)ccc1O"],
+)
+def test_esylate_isethionate_triflate_sulfosalicylate_salts(counterion):
+    assert flags(record(f"{IBUPROFEN}.{counterion}")) == {"salt_or_solvate"}

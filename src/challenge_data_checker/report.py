@@ -16,6 +16,7 @@ from rich.table import Table
 from challenge_data_checker.checks import (
     identifier_leakage,
     identifier_namespace_issues,
+    inconsistent_smiles,
     internal_duplicates,
     tanimoto_leakage,
     train_test_leakage,
@@ -32,6 +33,7 @@ from challenge_data_checker.report_types import (
     STEREO_INSENSITIVE_REPRESENTATIONS,
     CheckReport,
     CheckSummary,
+    InconsistentSmiles,
     InternalDuplicates,
     LeakageFinding,
     Location,
@@ -309,9 +311,17 @@ def build_check_report(
     namespace_issues = identifier_namespace_issues(records, identifier_columns, strip_salts)
     _mark_resolvable_rows(unparseable, namespace_issues)
     quality = quality_flag_entries(records)
+    inconsistent = inconsistent_smiles(records)
     status, blocking, flagged = summarise_tiers(
         collect_findings(
-            unparseable, {}, {}, [], {"dataset": dupes}, namespace_issues, {"dataset": quality}
+            unparseable,
+            {},
+            {},
+            [],
+            {"dataset": dupes},
+            namespace_issues,
+            {"dataset": quality},
+            inconsistent,
         ),
         TierContext(),
     )
@@ -337,6 +347,7 @@ def build_check_report(
             "total_unparseable": len(unparseable),
             "total_unparseable_by_category": _unparseable_by_category(unparseable),
             "total_unparseable_resolvable_via_identifier": _resolvable_count(unparseable),
+            "total_inconsistent_smiles": len(inconsistent),
             "total_internal_duplicates": {name: len(dupes[name]) for name in REPRESENTATIONS},
             "total_internal_duplicates_identifiers": {
                 col: len(found) for col, found in dupes["identifiers"].items()
@@ -347,6 +358,7 @@ def build_check_report(
             },
         },
         "unparseable_smiles": unparseable,
+        "inconsistent_smiles": inconsistent,
         "internal_duplicates": dupes,
         "identifier_namespace_issues": namespace_issues,
         "quality_flags": quality,
@@ -402,6 +414,7 @@ def build_report(
     _mark_resolvable_rows(unparseable, namespace_issues)
     quality_train = quality_flag_entries(train_records)
     quality_test = quality_flag_entries(test_records)
+    inconsistent = inconsistent_smiles(all_records)
 
     exact_train, salt_form_train, stereo_train = _leaked_counts(exact_leakage, "train")
     exact_test, salt_form_test, stereo_test = _leaked_counts(exact_leakage, "test")
@@ -414,6 +427,7 @@ def build_report(
             {"train": train_dupes, "test": test_dupes},
             namespace_issues,
             {"train": quality_train, "test": quality_test},
+            inconsistent,
         ),
         TierContext(config.settings.max_train_test_similarity),
     )
@@ -428,6 +442,7 @@ def build_report(
         "total_unparseable_test": sum(1 for r in test_records if not r.is_parsed),
         "total_unparseable_resolvable_via_identifier": _resolvable_count(unparseable),
         "total_unparseable_by_category": _unparseable_by_category(unparseable),
+        "total_inconsistent_smiles": len(inconsistent),
         "total_exact_leaked_train_molecules": exact_train,
         "total_exact_leaked_test_molecules": exact_test,
         "total_salt_form_leaked_train_molecules": salt_form_train,
@@ -488,6 +503,7 @@ def build_report(
         },
         "summary": summary,
         "unparseable_smiles": unparseable,
+        "inconsistent_smiles": inconsistent,
         "train_test_leakage": {
             "exact": exact_leakage,
             "identifiers": id_leakage,
@@ -640,6 +656,7 @@ def _build_summary_lines(report: Report) -> list[str]:
             if s["total_unparseable_resolvable_via_identifier"]
             else []
         ),
+        f"Inconsistent SMILES   : {s['total_inconsistent_smiles']}",
         "",
         "Train-test leakage",
         (
@@ -1100,6 +1117,25 @@ def _unparseable_line(s: Summary | CheckSummary, per_pool: str) -> str:
     return line
 
 
+def _inconsistent_line(s: Summary | CheckSummary) -> str:
+    """Build the dashboard's inconsistent-SMILES line.
+
+    Parameters
+    ----------
+    s : Summary | CheckSummary
+        The report's ``"summary"`` dict.
+
+    Returns
+    -------
+    str
+        A rich markup line with the number of structures written as more
+        than one SMILES string.
+    """
+    n = s["total_inconsistent_smiles"]
+    style = _count_style(n, severity_of("inconsistent_smiles", None, TierContext()))
+    return f"  Inconsistent SMILES: [{style}]{n}[/] structure(s) written as more than one SMILES"
+
+
 def print_summary(report: Report | CheckReport, report_output: str | Path | None) -> None:
     """Print the stdout summary dashboard for a completed audit or check report.
 
@@ -1186,6 +1222,7 @@ def print_summary(report: Report | CheckReport, report_output: str | Path | None
         f"  Generated          : {report['generated_at']}",
         rows_line,
         unparseable,
+        _inconsistent_line(s),
         "  Legend             : [bold red]✗ blocking (FAIL)[/]  "
         "[bold yellow]⚠ flagged for review (WARN)[/]  [bold green]✓ clean[/]",
         "",
@@ -1575,6 +1612,35 @@ def _unparseable_lines(unparseable: list[UnparseableEntry]) -> list[str]:
     ]
 
 
+def _inconsistent_smiles_lines(findings: list[InconsistentSmiles]) -> list[str]:
+    """Render structures written as more than one SMILES string.
+
+    Parameters
+    ----------
+    findings : list[InconsistentSmiles]
+        The report's ``inconsistent_smiles``.
+
+    Returns
+    -------
+    list[str]
+        One block per structure, listing each SMILES string with its files
+        and rows.
+    """
+    tag = _tag("inconsistent_smiles", None, TierContext())
+    lines = []
+    for finding in findings:
+        lines.append(
+            f"  {tag} inchikey={finding['inchikey']!r} "
+            f"(canonical_smiles={finding['canonical_smiles']!r}) is written "
+            f"{len(finding['representations'])} ways"
+        )
+        for representation in finding["representations"]:
+            files = ", ".join(representation["source_files"])
+            lines.append(f"    {representation['raw_smiles']!r} in {files}")
+            lines.extend(_fmt_locations(representation["occurrences"], indent="        "))
+    return lines
+
+
 def _format_check_report_as_text(report: CheckReport) -> str:
     """Render a single-dataset check report as plain text.
 
@@ -1613,6 +1679,7 @@ def _format_check_report_as_text(report: CheckReport) -> str:
         "",
         f"Rows processed        : {s['total_rows']}",
         f"Unparseable SMILES    : {s['total_unparseable']}",
+        f"Inconsistent SMILES   : {s['total_inconsistent_smiles']}",
     ]
     if s["total_unparseable_by_category"]:
         lines.append(f"  by category        : {_fmt_counts(s['total_unparseable_by_category'])}")
@@ -1626,6 +1693,12 @@ def _format_check_report_as_text(report: CheckReport) -> str:
     lines.append("=" * 60)
     lines.append("")
     lines.extend(_section("Unparseable SMILES", _unparseable_lines(report["unparseable_smiles"])))
+    lines.extend(
+        _section(
+            "Inconsistent SMILES Representations",
+            _inconsistent_smiles_lines(report["inconsistent_smiles"]),
+        )
+    )
     lines.extend(
         _section(
             "Duplicates Within Dataset",
@@ -1682,6 +1755,12 @@ def _format_audit_report_as_text(report: Report) -> str:
     lines.append("")
 
     lines.extend(_section("Unparseable SMILES", _unparseable_lines(report["unparseable_smiles"])))
+    lines.extend(
+        _section(
+            "Inconsistent SMILES Representations",
+            _inconsistent_smiles_lines(report["inconsistent_smiles"]),
+        )
+    )
     lines.extend(
         _section(
             "Train-Test Leakage: Exact Matches",

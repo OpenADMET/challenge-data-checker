@@ -104,6 +104,10 @@ _COUNTERION_SMILES_RAW = {
     "OC(=O)C(F)(F)F",  # trifluoroacetate (TFA)
     "CS(=O)(=O)O",  # mesylate
     "Cc1ccc(S(=O)(=O)O)cc1",  # tosylate
+    "CCS(=O)(=O)O",  # esylate
+    "OCCS(=O)(=O)O",  # isethionate
+    "OS(=O)(=O)C(F)(F)F",  # triflate
+    "OC(=O)c1cc(S(=O)(=O)O)ccc1O",  # sulfosalicylate
     "OS(=O)(=O)c1ccccc1",  # besylate
     "OS(=O)(=O)c1ccc2ccccc2c1",  # napsylate
     "CC1(C)C2CCC1(CS(=O)(=O)O)C(=O)C2",  # camsylate

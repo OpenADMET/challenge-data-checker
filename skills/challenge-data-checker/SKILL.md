@@ -139,6 +139,7 @@ The sections:
 | `internal_duplicates.<pool>` | Repeats within one pool, per representation and identifier column |
 | `identifier_namespace_issues.<col>` | An ID with several structures (each with a `conflict_type`), a compound with several IDs, near-duplicate or whitespace-padded IDs, IDs whose SMILES is broken or empty in some rows |
 | `quality_flags.<pool>` | Salts/solvates, metals, multi-component entries, homodimers, net charge, undefined stereo, suspicious fragments, RDKit warnings |
+| `inconsistent_smiles` | Structures written as more than one SMILES string, with the files using each form |
 | `unparseable_smiles` | Rows that didn't parse, with RDKit's message, a `category`, and `resolvable_via_identifier` |
 
 `format_report_as_text` (or `report_format = "txt"`) gives the same content
@@ -176,7 +177,10 @@ Within a dataset:
   - unparseable SMILES (FAIL)
   - one ID with genuinely different compounds (`conflict_type:
     different_compound`, FAIL)
-  - homodimers or net-charged entries, i.e. a stripped counterion (FAIL)
+  - homodimers, i.e. a 2:1 salt with its acid stripped (FAIL)
+  - structures written as different SMILES in different files
+    (`inconsistent_smiles`): the files probably went through different
+    processing pipelines, so check that nothing else differs between them
   - multi-component entries (two drugs concatenated)
   - duplicates within the *test* set (FAIL: they double-weight scoring)
 - **Fixable:** empty SMILES with `resolvable_via_identifier` set can be
