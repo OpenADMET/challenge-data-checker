@@ -25,6 +25,7 @@ from challenge_data_checker.parse_errors import (
 from challenge_data_checker.quality_filters import (
     classify_fragments,
     contains_metal,
+    count_undefined_stereo,
     has_multiple_fragments,
     is_suspicious_small_fragment,
 )
@@ -399,6 +400,8 @@ class MoleculeProcessor:
             return record
         mol = parsed.mol
         record.net_charge = Chem.GetFormalCharge(mol)
+        # Before standardisation, which could add or remove stereo elements.
+        record.undefined_stereocentres, record.undefined_stereo_bonds = count_undefined_stereo(mol)
         record.rdkit_warning = parsed.warning
         record.smiles_whitespace_recovered = parsed.whitespace_recovered
 

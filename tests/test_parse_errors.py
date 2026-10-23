@@ -122,7 +122,12 @@ def test_whitespace_recovery_and_rdkit_warnings_only_warn():
     report = _report([" C[C@H](N)C(=O)O |&1:1|"], ["C/C=C(/F)/C=C/F"])
     s = report["summary"]
     assert s["status"] == "WARN"
-    assert set(s["flagged"]["by_type"]) == {"smiles_whitespace", "rdkit_warning"}
+    # The conflicting bond directions leave that double bond's stereo undefined.
+    assert set(s["flagged"]["by_type"]) == {
+        "smiles_whitespace",
+        "rdkit_warning",
+        "undefined_stereo",
+    }
     assert s["total_quality_flags"]["smiles_whitespace"] == {"train": 1, "test": 0}
     assert s["total_quality_flags"]["rdkit_warnings"] == {"train": 0, "test": 1}
     text = format_report_as_text(report)

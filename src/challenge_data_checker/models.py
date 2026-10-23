@@ -83,6 +83,10 @@ class MoleculeRecord:
         Whether it has several fragments that none of the above explains.
     net_charge : int | None
         Sum of formal charges as drawn, or ``None`` if unparsed.
+    undefined_stereocentres : int
+        Stereocentres whose configuration the SMILES leaves unspecified.
+    undefined_stereo_bonds : int
+        Stereo double bonds whose configuration is unspecified.
     is_suspicious_fragment : bool
         Whether the molecule looks like a stripped degradation artefact
         (e.g. a bare counterion).
@@ -117,6 +121,8 @@ class MoleculeRecord:
     is_homodimer_without_counterion: bool = False
     is_unclassified_mixture: bool = False
     net_charge: int | None = None
+    undefined_stereocentres: int = 0
+    undefined_stereo_bonds: int = 0
     is_suspicious_fragment: bool = False
 
     @property

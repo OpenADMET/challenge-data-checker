@@ -48,6 +48,7 @@ type QualityFlagCategory = Literal[
     "homodimer_without_counterion",
     "unclassified_mixture",
     "net_charge",
+    "undefined_stereo",
     "suspicious_fragments",
     "smiles_whitespace",
     "rdkit_warnings",
@@ -61,6 +62,7 @@ QUALITY_FLAG_CATEGORIES: tuple[QualityFlagCategory, ...] = (
     "homodimer_without_counterion",
     "unclassified_mixture",
     "net_charge",
+    "undefined_stereo",
     "suspicious_fragments",
     "smiles_whitespace",
     "rdkit_warnings",
@@ -119,6 +121,13 @@ class NetChargeEntry(Location):
     """A row whose formal charges don't sum to zero."""
 
     charge: int
+
+
+class UndefinedStereoEntry(Location):
+    """A row whose SMILES leaves some stereochemistry unspecified."""
+
+    stereocentres: int
+    stereo_bonds: int
 
 
 class LeakageFinding(TypedDict):
@@ -277,6 +286,7 @@ class QualityFlags(TypedDict):
     homodimer_without_counterion: list[Location]
     unclassified_mixture: list[Location]
     net_charge: list[NetChargeEntry]
+    undefined_stereo: list[UndefinedStereoEntry]
     smiles_whitespace: list[Location]
     rdkit_warnings: list[RdkitWarningEntry]
 

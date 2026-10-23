@@ -71,6 +71,10 @@ issues. Built for sequential processing of datasets up to ~10,000 molecules.
     whose cation was stripped (zwitterions and nitro groups are neutral and
     aren't flagged)
   - entries containing a metal
+  - entries with undefined stereochemistry: unspecified stereocentres
+    (including ring cis/trans and sulfoxides) or stereo double bonds, which
+    leave it ambiguous whether the compound is a racemate, unknown, or had
+    its stereo lost in a pipeline
   - suspicious tiny fragments that look like stripped degradation
     artefacts (e.g. a bare cyanide left over from a failed preprocessing
     pipeline); common small molecules such as methanol, ethanol,
@@ -283,7 +287,7 @@ otherwise. Four rules decide the tier:
 | Identifier with surrounding whitespace; near-duplicate identifiers (case or `-`/`_` only) | | | WARN |
 | Identifier with valid and unparseable SMILES; empty SMILES resolvable via its identifier | | | WARN (the unparseable rows themselves still FAIL) |
 | Homodimer without counterion; net formal charge ≠ 0 | FAIL | FAIL | |
-| Salt or solvate, contains metal, multi-component, other mixtures, suspicious fragments | WARN | WARN | |
+| Salt or solvate, contains metal, multi-component, other mixtures, suspicious fragments, undefined stereochemistry | WARN | WARN | |
 | SMILES that only parses after stripping whitespace; RDKit parse warnings | WARN | WARN | |
 
 Counts are of distinct problems and rows, not of checks that fired: a

@@ -8,6 +8,11 @@ All notable changes to this project are recorded here. The format follows
 
 ### Added
 
+- Undefined-stereochemistry quality flag, `undefined_stereo` (WARN, #19):
+  entries with unspecified stereocentres (including ring cis/trans and
+  sulfoxides) or stereo double bonds, found with RDKit's
+  `FindPotentialStereo` on the molecule as parsed, before tautomer
+  standardisation. Each entry gives the counts.
 - SMILES parse failures now keep RDKit's own message (e.g. "unclosed ring",
   "Explicit valence for atom # 1 N, 5, is greater than permitted") instead
   of a generic "RDKit failed to parse SMILES". Each failure also gets a

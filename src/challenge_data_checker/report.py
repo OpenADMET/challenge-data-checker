@@ -82,6 +82,15 @@ def quality_flag_entries(records: list[MoleculeRecord]) -> QualityFlags:
             for r in parsed
             if r.net_charge is not None and r.net_charge != 0
         ],
+        "undefined_stereo": [
+            {
+                **r.location(),
+                "stereocentres": r.undefined_stereocentres,
+                "stereo_bonds": r.undefined_stereo_bonds,
+            }
+            for r in parsed
+            if r.undefined_stereocentres or r.undefined_stereo_bonds
+        ],
         "mixtures": [r.location() for r in parsed if r.is_mixture],
         "salts_or_metal_complexes": [r.location() for r in parsed if r.is_salt_or_metal],
         "suspicious_fragments": [
@@ -861,6 +870,7 @@ _QUALITY_FLAG_LABELS: dict[str, str] = {
     "homodimer_without_counterion": "Homodimer, no counterion",
     "unclassified_mixture": "Other mixtures",
     "net_charge": "Net charge",
+    "undefined_stereo": "Undefined stereo",
     "suspicious_fragments": "Suspicious fragments",
     "smiles_whitespace": "Whitespace in SMILES",
     "rdkit_warnings": "RDKit parse warnings",
@@ -1294,6 +1304,12 @@ def _quality_flag_lines(quality_flags: QualityFlags, pool: Literal["train", "tes
             lines.extend(
                 f"    {_fmt_location(entry)} -- {entry['warning']}"
                 for entry in quality_flags["rdkit_warnings"]
+            )
+        elif category == "undefined_stereo":
+            lines.extend(
+                f"    {_fmt_location(entry)} -- {entry['stereocentres']} undefined "
+                f"stereocentre(s), {entry['stereo_bonds']} undefined stereo double bond(s)"
+                for entry in quality_flags["undefined_stereo"]
             )
         elif category == "net_charge":
             lines.extend(

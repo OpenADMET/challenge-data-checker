@@ -404,6 +404,33 @@ def classify_fragments(mol: Chem.Mol) -> FragmentClassification:
     )
 
 
+def count_undefined_stereo(mol: Chem.Mol) -> tuple[int, int]:
+    """Count stereo elements whose configuration the SMILES leaves unspecified.
+
+    Uses RDKit's ``FindPotentialStereo``, which also finds ring stereo
+    (e.g. cis/trans 1,4-disubstituted cyclohexanes) and non-carbon centres
+    such as sulfoxides.
+
+    Parameters
+    ----------
+    mol : Chem.Mol
+        The molecule as parsed, before any standardisation that could add or
+        remove stereo elements.
+
+    Returns
+    -------
+    int
+        Unspecified tetrahedral stereocentres.
+    int
+        Unspecified stereo double bonds.
+    """
+    infos = Chem.FindPotentialStereo(Chem.Mol(mol))
+    unspecified = [i for i in infos if i.specified == Chem.StereoSpecified.Unspecified]
+    centres = sum(1 for i in unspecified if i.type == Chem.StereoType.Atom_Tetrahedral)
+    bonds = sum(1 for i in unspecified if i.type == Chem.StereoType.Bond_Double)
+    return centres, bonds
+
+
 def _canonical(smiles: str) -> str | None:
     """Canonicalise a SMILES string, tolerating unparseable input.
 

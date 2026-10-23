@@ -84,9 +84,13 @@ def test_stereoisomer_overlap_and_duplicates_only_warn():
     across = audit(rows("CC(N)C(=O)O"), rows("C[C@H](N)C(=O)O"))
     within_test = audit(rows("c1ccccc1"), rows("CC(N)C(=O)O", "C[C@H](N)C(=O)O"))
     assert across["summary"]["status"] == "WARN"
-    assert set(across["summary"]["flagged"]["by_type"]) == {"stereo_overlap"}
+    # The racemate also has an undefined stereocentre.
+    assert set(across["summary"]["flagged"]["by_type"]) == {"stereo_overlap", "undefined_stereo"}
     assert within_test["summary"]["status"] == "WARN"
-    assert set(within_test["summary"]["flagged"]["by_type"]) == {"duplicate_stereoisomer"}
+    assert set(within_test["summary"]["flagged"]["by_type"]) == {
+        "duplicate_stereoisomer",
+        "undefined_stereo",
+    }
 
 
 def test_salt_form_overlap_fails():
