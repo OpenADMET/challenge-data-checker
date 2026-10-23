@@ -11,6 +11,17 @@ from challenge_data_checker.report import (
     print_summary,
     save_report,
 )
+from challenge_data_checker.report_types import (
+    QUALITY_FLAG_CATEGORIES,
+    REPRESENTATIONS,
+    InternalDuplicates,
+    NamespaceIssues,
+    QualityFlags,
+    Report,
+    ReportConfig,
+    Summary,
+    TrainTestLeakage,
+)
 
 
 def make_config(tmp_path):
@@ -64,6 +75,32 @@ def test_build_report_contains_expected_top_level_keys(tmp_path):
     assert report["summary"]["total_train_rows"] == 1
     assert report["summary"]["total_test_rows"] == 1
     assert report["config"]["report_format"] == "json"
+
+
+def test_build_report_keys_match_typed_schema(tmp_path):
+    # mypy only checks the code that builds the report; this guards the
+    # TypedDict schema against drifting from what's actually emitted.
+    config = make_config(tmp_path)
+    train = [
+        make_record("train", 0, "CCO", "CCO", "IK1", {"compound_id": "C1"}),
+        make_record("train", 1, "CCO", "CCO", "IK1", {"compound_id": "C1"}),
+    ]
+    test = [make_record("test", 0, "CCO", "CCO", "IK1", {"compound_id": "C1"})]
+
+    report = build_report(config, train, test, ["compound_id"])
+
+    assert set(report) == set(Report.__annotations__)
+    assert set(report["config"]) == set(ReportConfig.__annotations__)
+    assert set(report["summary"]) == set(Summary.__annotations__)
+    assert set(report["train_test_leakage"]) == set(TrainTestLeakage.__annotations__)
+    for pool in ("train", "test"):
+        assert set(report["internal_duplicates"][pool]) == set(InternalDuplicates.__annotations__)
+        assert set(report["quality_flags"][pool]) == set(QualityFlags.__annotations__)
+    assert set(report["internal_duplicates"]["train"]) == {*REPRESENTATIONS, "identifiers"}
+    assert set(report["quality_flags"]["train"]) == set(QUALITY_FLAG_CATEGORIES)
+    assert set(report["identifier_namespace_issues"]["compound_id"]) == set(
+        NamespaceIssues.__annotations__
+    )
 
 
 def test_build_report_records_resolved_smiles_columns(tmp_path):

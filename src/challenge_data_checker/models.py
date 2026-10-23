@@ -3,6 +3,8 @@
 from dataclasses import dataclass, field
 from typing import Any
 
+from challenge_data_checker.report_types import Location
+
 Fingerprint = Any  # rdkit.DataStructs.cDataStructs.ExplicitBitVect
 
 
@@ -79,12 +81,12 @@ class MoleculeRecord:
         """
         return self.parse_error is None
 
-    def location(self) -> dict[str, object]:
+    def location(self) -> Location:
         """Build a compact reference to where this row came from, for reports.
 
         Returns
         -------
-        dict[str, object]
+        Location
             A dict with the pool, source file, row index, and raw SMILES.
         """
         return {

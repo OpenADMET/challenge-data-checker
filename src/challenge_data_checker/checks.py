@@ -3,11 +3,23 @@
 import logging
 from collections import defaultdict
 from collections.abc import Callable
-from typing import Any
 
 from rdkit import DataStructs
 
 from challenge_data_checker.models import MoleculeRecord
+from challenge_data_checker.report_types import (
+    DuplicateFinding,
+    IdentifierOccurrences,
+    InternalDuplicates,
+    LeakageFinding,
+    NamespaceIssues,
+    OneIdMultipleStructures,
+    OneStructureMultipleIds,
+    Representation,
+    StructureOccurrences,
+    TanimotoFinding,
+    UnparseableEntry,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +30,7 @@ KeyFunc = Callable[[MoleculeRecord], str | None]
 TANIMOTO_PAIR_WARNING_THRESHOLD = 100_000_000
 
 
-def unparseable_entries(records: list[MoleculeRecord]) -> list[dict]:
+def unparseable_entries(records: list[MoleculeRecord]) -> list[UnparseableEntry]:
     """Collect rows whose SMILES could not be parsed or processed.
 
     Parameters
@@ -28,10 +40,10 @@ def unparseable_entries(records: list[MoleculeRecord]) -> list[dict]:
 
     Returns
     -------
-    list[dict]
+    list[UnparseableEntry]
         A list of location/error dicts, one per unparseable record.
     """
-    return [{**r.location(), "error": r.parse_error} for r in records if not r.is_parsed]
+    return [{**r.location(), "error": r.parse_error} for r in records if r.parse_error is not None]
 
 
 def _index_by(records: list[MoleculeRecord], key_func: KeyFunc) -> dict[str, list[MoleculeRecord]]:
@@ -58,12 +70,12 @@ def _index_by(records: list[MoleculeRecord], key_func: KeyFunc) -> dict[str, lis
     return index
 
 
-def _representation_key_funcs() -> dict[str, KeyFunc]:
+def _representation_key_funcs() -> dict[Representation, KeyFunc]:
     """Build the key functions for each chemical representation.
 
     Returns
     -------
-    dict[str, KeyFunc]
+    dict[Representation, KeyFunc]
         A mapping of representation name (``raw_smiles``,
         ``canonical_smiles``, ``inchikey``) to a function extracting that
         representation's value from a record.
@@ -97,7 +109,7 @@ def _identifier_key_func(col: str) -> KeyFunc:
 
 def train_test_leakage(
     train_records: list[MoleculeRecord], test_records: list[MoleculeRecord]
-) -> dict[str, list[dict]]:
+) -> dict[str, list[LeakageFinding]]:
     """Find raw SMILES / canonical SMILES / InChIKey values present in both pools.
 
     Parameters
@@ -109,11 +121,11 @@ def train_test_leakage(
 
     Returns
     -------
-    dict[str, list[dict]]
+    dict[str, list[LeakageFinding]]
         A mapping of representation name to a list of leakage findings,
         each with the shared value and its train/test occurrences.
     """
-    result: dict[str, list[dict]] = {}
+    result: dict[str, list[LeakageFinding]] = {}
     for name, key_func in _representation_key_funcs().items():
         train_index = _index_by(train_records, key_func)
         test_index = _index_by(test_records, key_func)
@@ -133,7 +145,7 @@ def identifier_leakage(
     train_records: list[MoleculeRecord],
     test_records: list[MoleculeRecord],
     identifier_columns: list[str],
-) -> dict[str, list[dict]]:
+) -> dict[str, list[LeakageFinding]]:
     """Find identifier values (within the same column) present in both pools.
 
     Parameters
@@ -147,12 +159,12 @@ def identifier_leakage(
 
     Returns
     -------
-    dict[str, list[dict]]
+    dict[str, list[LeakageFinding]]
         A mapping of identifier column name to a list of leakage
         findings, each with the shared identifier value and its
         train/test occurrences.
     """
-    result: dict[str, list[dict]] = {}
+    result: dict[str, list[LeakageFinding]] = {}
     for col in identifier_columns:
         key_func = _identifier_key_func(col)
         train_index = _index_by(train_records, key_func)
@@ -169,9 +181,34 @@ def identifier_leakage(
     return result
 
 
+def _duplicates_by(records: list[MoleculeRecord], key_func: KeyFunc) -> list[DuplicateFinding]:
+    """Find key values shared by more than one record.
+
+    Parameters
+    ----------
+    records : list[MoleculeRecord]
+        The records to inspect.
+    key_func : KeyFunc
+        A function mapping a record to the value to compare, or ``None``
+        to exclude the record.
+
+    Returns
+    -------
+    list[DuplicateFinding]
+        One finding per duplicated value, sorted by value, listing all of
+        its occurrences.
+    """
+    index = _index_by(records, key_func)
+    return [
+        {"value": value, "occurrences": [r.location() for r in occs]}
+        for value, occs in sorted(index.items())
+        if len(occs) > 1
+    ]
+
+
 def internal_duplicates(
     records: list[MoleculeRecord], identifier_columns: list[str]
-) -> dict[str, Any]:
+) -> InternalDuplicates:
     """Find values that appear more than once within a single pool.
 
     Parameters
@@ -183,38 +220,27 @@ def internal_duplicates(
 
     Returns
     -------
-    dict[str, Any]
+    InternalDuplicates
         A mapping with one entry per representation (``raw_smiles``,
         ``canonical_smiles``, ``inchikey``) plus an ``"identifiers"``
         entry mapping each identifier column to its own duplicate
         findings. Each finding lists the duplicated value and all of its
         occurrences.
     """
-    result: dict[str, Any] = {}
-    for name, key_func in _representation_key_funcs().items():
-        index = _index_by(records, key_func)
-        result[name] = [
-            {"value": value, "occurrences": [r.location() for r in occs]}
-            for value, occs in sorted(index.items())
-            if len(occs) > 1
-        ]
-
-    identifiers_result: dict[str, list[dict]] = {}
-    for col in identifier_columns:
-        key_func = _identifier_key_func(col)
-        index = _index_by(records, key_func)
-        identifiers_result[col] = [
-            {"value": value, "occurrences": [r.location() for r in occs]}
-            for value, occs in sorted(index.items())
-            if len(occs) > 1
-        ]
-    result["identifiers"] = identifiers_result
-    return result
+    key_funcs = _representation_key_funcs()
+    return {
+        "raw_smiles": _duplicates_by(records, key_funcs["raw_smiles"]),
+        "canonical_smiles": _duplicates_by(records, key_funcs["canonical_smiles"]),
+        "inchikey": _duplicates_by(records, key_funcs["inchikey"]),
+        "identifiers": {
+            col: _duplicates_by(records, _identifier_key_func(col)) for col in identifier_columns
+        },
+    }
 
 
 def identifier_namespace_issues(
     all_records: list[MoleculeRecord], identifier_columns: list[str]
-) -> dict[str, dict[str, list[dict]]]:
+) -> dict[str, NamespaceIssues]:
     """Check identifier-to-structure consistency within each identifier column.
 
     For each identifier column, checked across the combined train+test pool:
@@ -234,12 +260,12 @@ def identifier_namespace_issues(
 
     Returns
     -------
-    dict[str, dict[str, list[dict]]]
+    dict[str, NamespaceIssues]
         A mapping of identifier column name to a dict with
         ``one_id_multiple_structures`` and ``one_structure_multiple_ids``
         finding lists.
     """
-    result: dict[str, dict[str, list[dict]]] = {}
+    result: dict[str, NamespaceIssues] = {}
     for col in identifier_columns:
         by_id: dict[str, list[MoleculeRecord]] = defaultdict(list)
         by_structure: dict[tuple[str | None, str | None], list[MoleculeRecord]] = defaultdict(list)
@@ -250,48 +276,43 @@ def identifier_namespace_issues(
             by_id[id_value].append(r)
             by_structure[(r.canonical_smiles, r.inchikey)].append(r)
 
-        one_id_multiple_structures = []
+        one_id_multiple_structures: list[OneIdMultipleStructures] = []
         for id_value, recs in sorted(by_id.items()):
             structures = {(r.canonical_smiles, r.inchikey) for r in recs}
             if len(structures) > 1:
-                one_id_multiple_structures.append(
+                structure_entries: list[StructureOccurrences] = [
                     {
-                        "identifier": id_value,
-                        "structures": [
-                            {
-                                "canonical_smiles": cs,
-                                "inchikey": ik,
-                                "occurrences": [
-                                    r.location()
-                                    for r in recs
-                                    if (r.canonical_smiles, r.inchikey) == (cs, ik)
-                                ],
-                            }
-                            for cs, ik in sorted(structures, key=lambda t: (t[0] or "", t[1] or ""))
+                        "canonical_smiles": cs,
+                        "inchikey": ik,
+                        "occurrences": [
+                            r.location()
+                            for r in recs
+                            if (r.canonical_smiles, r.inchikey) == (cs, ik)
                         ],
                     }
+                    for cs, ik in sorted(structures, key=lambda t: (t[0] or "", t[1] or ""))
+                ]
+                one_id_multiple_structures.append(
+                    {"identifier": id_value, "structures": structure_entries}
                 )
 
-        one_structure_multiple_ids = []
+        one_structure_multiple_ids: list[OneStructureMultipleIds] = []
         for (cs, ik), recs in sorted(
             by_structure.items(), key=lambda kv: (kv[0][0] or "", kv[0][1] or "")
         ):
             id_values = {r.identifiers.get(col) for r in recs}
             if len(id_values) > 1:
-                one_structure_multiple_ids.append(
+                identifier_entries: list[IdentifierOccurrences] = [
                     {
-                        "canonical_smiles": cs,
-                        "inchikey": ik,
-                        "identifiers": [
-                            {
-                                "identifier": id_value,
-                                "occurrences": [
-                                    r.location() for r in recs if r.identifiers.get(col) == id_value
-                                ],
-                            }
-                            for id_value in sorted(v for v in id_values if v is not None)
+                        "identifier": id_value,
+                        "occurrences": [
+                            r.location() for r in recs if r.identifiers.get(col) == id_value
                         ],
                     }
+                    for id_value in sorted(v for v in id_values if v is not None)
+                ]
+                one_structure_multiple_ids.append(
+                    {"canonical_smiles": cs, "inchikey": ik, "identifiers": identifier_entries}
                 )
 
         result[col] = {
@@ -305,7 +326,7 @@ def tanimoto_leakage(
     train_records: list[MoleculeRecord],
     test_records: list[MoleculeRecord],
     threshold: float,
-) -> list[dict]:
+) -> list[TanimotoFinding]:
     """Compute bulk pairwise Tanimoto similarity between train and test fingerprints.
 
     Flags pairs with similarity >= threshold as possible data leakage,
@@ -324,7 +345,7 @@ def tanimoto_leakage(
 
     Returns
     -------
-    list[dict]
+    list[TanimotoFinding]
         A list of findings, each with the train/test locations and their
         similarity, sorted by descending similarity.
     """
@@ -344,7 +365,7 @@ def tanimoto_leakage(
         )
 
     test_fps = [r.fingerprint for r in test_valid]
-    findings = []
+    findings: list[TanimotoFinding] = []
     for train_rec in train_valid:
         similarities = DataStructs.BulkTanimotoSimilarity(train_rec.fingerprint, test_fps)
         for test_rec, similarity in zip(test_valid, similarities, strict=True):

@@ -7,6 +7,7 @@ import sys
 from challenge_data_checker.config import ConfigError, load_config
 from challenge_data_checker.core import run_audit
 from challenge_data_checker.io_utils import ColumnResolutionError
+from challenge_data_checker.report_types import Report
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -31,7 +32,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def run(config_path: str) -> dict:
+def run(config_path: str) -> Report:
     """Run the full audit for a given config path.
 
     Parameters
@@ -41,7 +42,7 @@ def run(config_path: str) -> dict:
 
     Returns
     -------
-    dict
+    Report
         The JSON-serialisable report dict, as returned by
         ``report.build_report``.
     """

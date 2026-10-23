@@ -12,6 +12,10 @@ All notable changes to this project are recorded here. The format follows
 - A warning is logged before the train/test Tanimoto check when it will
   compare more than 100 million pairs (roughly a 10k × 10k split), so a
   long run isn't mistaken for a hang.
+- `challenge_data_checker.report_types`: `TypedDict` definitions of the
+  report schema. `audit()`, `cli.run()` and `build_report()` are now
+  annotated as returning `Report`. The returned value is still a plain
+  dict, so this is no behaviour change.
 
 ### Changed
 

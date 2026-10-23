@@ -8,9 +8,10 @@ from challenge_data_checker.chemistry import MoleculeProcessor, process_pool
 from challenge_data_checker.config import Config
 from challenge_data_checker.io_utils import load_pool
 from challenge_data_checker.report import build_report, print_summary, save_report
+from challenge_data_checker.report_types import PerPool, Report
 
 
-def run_audit(config: Config, *, save: bool = True, print_report: bool = True) -> dict:
+def run_audit(config: Config, *, save: bool = True, print_report: bool = True) -> Report:
     """Run the full audit pipeline for an already-built configuration.
 
     Parameters
@@ -26,7 +27,7 @@ def run_audit(config: Config, *, save: bool = True, print_report: bool = True) -
 
     Returns
     -------
-    dict
+    Report
         The JSON-serialisable report dict, as returned by
         ``report.build_report``.
     """
@@ -51,7 +52,10 @@ def run_audit(config: Config, *, save: bool = True, print_report: bool = True) -
     train_records = process_pool(train_df, "train", train_identifier_cols, processor)
     test_records = process_pool(test_df, "test", test_identifier_cols, processor)
 
-    resolved_smiles_columns = {"train": train_smiles_cols, "test": test_smiles_cols}
+    resolved_smiles_columns: PerPool[dict[str, str]] = {
+        "train": train_smiles_cols,
+        "test": test_smiles_cols,
+    }
     report = build_report(
         config, train_records, test_records, identifier_columns, resolved_smiles_columns
     )

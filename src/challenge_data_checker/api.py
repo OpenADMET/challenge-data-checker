@@ -19,6 +19,7 @@ from challenge_data_checker.config import (
 )
 from challenge_data_checker.core import run_audit
 from challenge_data_checker.io_utils import DataSource
+from challenge_data_checker.report_types import Report
 
 # A single train/test argument: one source, or a list of sources (paths and/or
 # DataFrames freely mixed).
@@ -55,7 +56,7 @@ def audit(
     report_output: str | Path | None = None,
     report_format: str | None = None,
     print_report: bool = True,
-) -> dict:
+) -> Report:
     """Run a challenge-data-checker audit directly from Python.
 
     A code-first alternative to the TOML-config CLI (``challenge-data-checker
@@ -97,7 +98,7 @@ def audit(
 
     Returns
     -------
-    dict
+    Report
         The full report dict (same shape as the CLI's report file/the
         JSON written by ``report.save_report``), regardless of
         ``report_output``/``print_report``.

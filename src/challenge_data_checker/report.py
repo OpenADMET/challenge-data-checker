@@ -1,8 +1,10 @@
 """Assembling the audit report (JSON or text) and the stdout summary dashboard."""
 
 import json
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
 from rich import box
 from rich.console import Console, Group, RenderableType
@@ -20,9 +22,22 @@ from challenge_data_checker.checks import (
 from challenge_data_checker.config import Config
 from challenge_data_checker.io_utils import describe_source
 from challenge_data_checker.models import MoleculeRecord
+from challenge_data_checker.report_types import (
+    QUALITY_FLAG_CATEGORIES,
+    REPRESENTATIONS,
+    InternalDuplicates,
+    LeakageFinding,
+    Location,
+    NamespaceIssues,
+    PerPool,
+    QualityFlags,
+    Report,
+    Summary,
+    TanimotoFinding,
+)
 
 
-def quality_flag_entries(records: list[MoleculeRecord]) -> dict[str, list[dict]]:
+def quality_flag_entries(records: list[MoleculeRecord]) -> QualityFlags:
     """Collect quality-filter findings (mixtures, salts/metals, suspicious fragments).
 
     Parameters
@@ -32,7 +47,7 @@ def quality_flag_entries(records: list[MoleculeRecord]) -> dict[str, list[dict]]
 
     Returns
     -------
-    dict[str, list[dict]]
+    QualityFlags
         A mapping of ``"mixtures"``, ``"salts_or_metal_complexes"``, and
         ``"suspicious_fragments"`` to the list of matching record
         locations.
@@ -48,14 +63,16 @@ def quality_flag_entries(records: list[MoleculeRecord]) -> dict[str, list[dict]]
     }
 
 
-def _unique_leaked_locations(exact_leakage: dict[str, list[dict]], side: str) -> int:
+def _unique_leaked_locations(
+    exact_leakage: dict[str, list[LeakageFinding]], side: Literal["train", "test"]
+) -> int:
     """Count the distinct rows involved in exact leakage findings on one side.
 
     Parameters
     ----------
-    exact_leakage : dict[str, list[dict]]
+    exact_leakage : dict[str, list[LeakageFinding]]
         The result of ``checks.train_test_leakage``.
-    side : str
+    side : Literal["train", "test"]
         Which side to count, ``"train"`` or ``"test"``.
 
     Returns
@@ -68,7 +85,8 @@ def _unique_leaked_locations(exact_leakage: dict[str, list[dict]], side: str) ->
     seen = set()
     for entries in exact_leakage.values():
         for entry in entries:
-            for occ in entry[f"{side}_occurrences"]:
+            occurrences = entry["train_occurrences" if side == "train" else "test_occurrences"]
+            for occ in occurrences:
                 seen.add((occ["pool"], occ["source_file"], occ["row_index"]))
     return len(seen)
 
@@ -78,8 +96,8 @@ def build_report(
     train_records: list[MoleculeRecord],
     test_records: list[MoleculeRecord],
     identifier_columns: list[str],
-    resolved_smiles_columns: dict[str, dict[str, str]] | None = None,
-) -> dict:
+    resolved_smiles_columns: PerPool[dict[str, str]] | None = None,
+) -> Report:
     """Run all checks and assemble the full JSON-serialisable audit report.
 
     Parameters
@@ -92,7 +110,7 @@ def build_report(
         Processed records from the test pool.
     identifier_columns : list[str]
         Identifier columns present in at least one pool.
-    resolved_smiles_columns : dict[str, dict[str, str]] | None
+    resolved_smiles_columns : PerPool[dict[str, str]] | None
         The SMILES column actually resolved for each source, as
         ``{"train": {source_label: column, ...}, "test": {...}}`` (see
         ``io_utils.load_pool``). Recorded in the report so it's
@@ -101,7 +119,7 @@ def build_report(
 
     Returns
     -------
-    dict
+    Report
         The full report dict, containing the echoed config, a summary of
         counts, and the detailed findings from every check.
     """
@@ -121,7 +139,7 @@ def build_report(
     quality_train = quality_flag_entries(train_records)
     quality_test = quality_flag_entries(test_records)
 
-    summary = {
+    summary: Summary = {
         "total_train_rows": len(train_records),
         "total_test_rows": len(test_records),
         "total_unparseable": len(unparseable),
@@ -132,11 +150,9 @@ def build_report(
         "total_identifier_leakage_events": sum(len(v) for v in id_leakage.values()),
         "total_tanimoto_leakage_pairs": len(tanimoto),
         "total_internal_duplicates_train": {
-            k: len(v) for k, v in train_dupes.items() if k != "identifiers"
+            name: len(train_dupes[name]) for name in REPRESENTATIONS
         },
-        "total_internal_duplicates_test": {
-            k: len(v) for k, v in test_dupes.items() if k != "identifiers"
-        },
+        "total_internal_duplicates_test": {name: len(test_dupes[name]) for name in REPRESENTATIONS},
         "total_internal_duplicates_train_identifiers": {
             k: len(v) for k, v in train_dupes["identifiers"].items()
         },
@@ -191,14 +207,14 @@ def build_report(
     }
 
 
-def save_report(report: dict, output_path: str | Path, report_format: str = "json") -> None:
+def save_report(report: Report, output_path: str | Path, report_format: str = "json") -> None:
     """Write the report to disk as either indented JSON or human-readable text.
 
     Creates any missing parent directories of ``output_path``.
 
     Parameters
     ----------
-    report : dict
+    report : Report
         The report dict, as returned by ``build_report``.
     output_path : str | Path
         Path to write the report to.
@@ -226,12 +242,12 @@ def save_report(report: dict, output_path: str | Path, report_format: str = "jso
         raise ValueError(f"Unsupported report_format '{report_format}'. Use 'json' or 'txt'.")
 
 
-def _fmt_counts(counts: dict[str, int]) -> str:
+def _fmt_counts(counts: Mapping[str, object]) -> str:
     """Format a mapping of counts as a compact ``key=value, ...`` string.
 
     Parameters
     ----------
-    counts : dict[str, int]
+    counts : Mapping[str, object]
         The counts to format.
 
     Returns
@@ -242,12 +258,12 @@ def _fmt_counts(counts: dict[str, int]) -> str:
     return ", ".join(f"{k}={v}" for k, v in counts.items())
 
 
-def _build_summary_lines(report: dict) -> list[str]:
+def _build_summary_lines(report: Report) -> list[str]:
     """Build the summary dashboard as a list of text lines.
 
     Parameters
     ----------
-    report : dict
+    report : Report
         The report dict, as returned by ``build_report``.
 
     Returns
@@ -402,12 +418,12 @@ def _section_renderables(title: str, table: Table | None) -> list[RenderableType
     return [f"[bold cyan]{title}[/]", table if table is not None else placeholder, ""]
 
 
-def _leakage_table(s: dict) -> Table:
+def _leakage_table(s: Summary) -> Table:
     """Build the train-test leakage summary table.
 
     Parameters
     ----------
-    s : dict
+    s : Summary
         The report's ``"summary"`` dict.
 
     Returns
@@ -432,12 +448,12 @@ def _leakage_table(s: dict) -> Table:
     return table
 
 
-def _duplicates_table(s: dict) -> Table:
+def _duplicates_table(s: Summary) -> Table:
     """Build the internal (within-split) duplicates summary table.
 
     Parameters
     ----------
-    s : dict
+    s : Summary
         The report's ``"summary"`` dict.
 
     Returns
@@ -447,7 +463,7 @@ def _duplicates_table(s: dict) -> Table:
         showing train and test counts side by side.
     """
     table = _new_table(["Representation", "Train", "Test"])
-    for representation in ("raw_smiles", "canonical_smiles", "inchikey"):
+    for representation in REPRESENTATIONS:
         table.add_row(
             representation,
             _status_cell(s["total_internal_duplicates_train"][representation]),
@@ -462,12 +478,12 @@ def _duplicates_table(s: dict) -> Table:
     return table
 
 
-def _namespace_table(s: dict) -> Table | None:
+def _namespace_table(s: Summary) -> Table | None:
     """Build the identifier namespace consistency summary table.
 
     Parameters
     ----------
-    s : dict
+    s : Summary
         The report's ``"summary"`` dict.
 
     Returns
@@ -488,12 +504,12 @@ def _namespace_table(s: dict) -> Table | None:
     return table
 
 
-def _quality_table(s: dict) -> Table:
+def _quality_table(s: Summary) -> Table:
     """Build the quality-filter flags summary table.
 
     Parameters
     ----------
-    s : dict
+    s : Summary
         The report's ``"summary"`` dict.
 
     Returns
@@ -521,12 +537,12 @@ def _quality_table(s: dict) -> Table:
     return table
 
 
-def _total_issue_count(s: dict) -> int:
+def _total_issue_count(s: Summary) -> int:
     """Sum every finding count in the summary into a single overall issue count.
 
     Parameters
     ----------
-    s : dict
+    s : Summary
         The report's ``"summary"`` dict.
 
     Returns
@@ -545,17 +561,19 @@ def _total_issue_count(s: dict) -> int:
         + sum(s["total_internal_duplicates_train_identifiers"].values())
         + sum(s["total_internal_duplicates_test_identifiers"].values())
         + sum(
-            count
+            counts["one_id_multiple_structures"] + counts["one_structure_multiple_ids"]
             for counts in s["total_identifier_namespace_issues"].values()
-            for count in counts.values()
         )
-        + sum(s["total_mixtures"].values())
-        + sum(s["total_salts_or_metal_complexes"].values())
-        + sum(s["total_suspicious_fragments"].values())
+        + s["total_mixtures"]["train"]
+        + s["total_mixtures"]["test"]
+        + s["total_salts_or_metal_complexes"]["train"]
+        + s["total_salts_or_metal_complexes"]["test"]
+        + s["total_suspicious_fragments"]["train"]
+        + s["total_suspicious_fragments"]["test"]
     )
 
 
-def print_summary(report: dict, report_output: str | Path | None) -> None:
+def print_summary(report: Report, report_output: str | Path | None) -> None:
     """Print the stdout summary dashboard for a completed audit report.
 
     Renders row counts, unparseable SMILES, and one colored table per check
@@ -568,7 +586,7 @@ def print_summary(report: dict, report_output: str | Path | None) -> None:
 
     Parameters
     ----------
-    report : dict
+    report : Report
         The report dict, as returned by ``build_report``.
     report_output : str | Path | None
         Path the full report was written to, shown in the final line of
@@ -613,12 +631,12 @@ def print_summary(report: dict, report_output: str | Path | None) -> None:
     Console(highlight=False).print(Group(*renderables))
 
 
-def _fmt_location(location: dict) -> str:
+def _fmt_location(location: Location) -> str:
     """Format a record location dict as a single readable line.
 
     Parameters
     ----------
-    location : dict
+    location : Location
         A location dict, as returned by ``MoleculeRecord.location``.
 
     Returns
@@ -632,12 +650,12 @@ def _fmt_location(location: dict) -> str:
     )
 
 
-def _fmt_locations(locations: list[dict], indent: str = "      ") -> list[str]:
+def _fmt_locations(locations: list[Location], indent: str = "      ") -> list[str]:
     """Format a list of record locations as indented lines.
 
     Parameters
     ----------
-    locations : list[dict]
+    locations : list[Location]
         The location dicts to format.
     indent : str
         Prefix to indent each line with.
@@ -673,12 +691,12 @@ def _section(title: str, body_lines: list[str]) -> list[str]:
     return lines
 
 
-def _exact_leakage_lines(exact_leakage: dict[str, list[dict]]) -> list[str]:
+def _exact_leakage_lines(exact_leakage: dict[str, list[LeakageFinding]]) -> list[str]:
     """Render exact train/test leakage findings (raw/canonical SMILES, InChIKey).
 
     Parameters
     ----------
-    exact_leakage : dict[str, list[dict]]
+    exact_leakage : dict[str, list[LeakageFinding]]
         The result of ``checks.train_test_leakage``.
 
     Returns
@@ -695,12 +713,12 @@ def _exact_leakage_lines(exact_leakage: dict[str, list[dict]]) -> list[str]:
     return lines
 
 
-def _identifier_leakage_lines(id_leakage: dict[str, list[dict]]) -> list[str]:
+def _identifier_leakage_lines(id_leakage: dict[str, list[LeakageFinding]]) -> list[str]:
     """Render identifier-column overlap findings between train and test.
 
     Parameters
     ----------
-    id_leakage : dict[str, list[dict]]
+    id_leakage : dict[str, list[LeakageFinding]]
         The result of ``checks.identifier_leakage``.
 
     Returns
@@ -718,12 +736,12 @@ def _identifier_leakage_lines(id_leakage: dict[str, list[dict]]) -> list[str]:
     return lines
 
 
-def _tanimoto_lines(tanimoto: list[dict]) -> list[str]:
+def _tanimoto_lines(tanimoto: list[TanimotoFinding]) -> list[str]:
     """Render Tanimoto similarity leakage findings.
 
     Parameters
     ----------
-    tanimoto : list[dict]
+    tanimoto : list[TanimotoFinding]
         The result of ``checks.tanimoto_leakage``.
 
     Returns
@@ -738,12 +756,12 @@ def _tanimoto_lines(tanimoto: list[dict]) -> list[str]:
     return lines
 
 
-def _internal_duplicates_lines(dupes: dict) -> list[str]:
+def _internal_duplicates_lines(dupes: InternalDuplicates) -> list[str]:
     """Render within-split internal duplicate findings.
 
     Parameters
     ----------
-    dupes : dict
+    dupes : InternalDuplicates
         The result of ``checks.internal_duplicates`` for one pool.
 
     Returns
@@ -753,25 +771,23 @@ def _internal_duplicates_lines(dupes: dict) -> list[str]:
         and identifier columns.
     """
     lines = []
-    for representation, findings in dupes.items():
-        if representation == "identifiers":
-            for column, id_findings in findings.items():
-                for finding in id_findings:
-                    lines.append(f"  identifier[{column}] = {finding['value']!r}")
-                    lines.extend(_fmt_locations(finding["occurrences"]))
-        else:
-            for finding in findings:
-                lines.append(f"  {representation} = {finding['value']!r}")
-                lines.extend(_fmt_locations(finding["occurrences"]))
+    for representation in REPRESENTATIONS:
+        for finding in dupes[representation]:
+            lines.append(f"  {representation} = {finding['value']!r}")
+            lines.extend(_fmt_locations(finding["occurrences"]))
+    for column, id_findings in dupes["identifiers"].items():
+        for finding in id_findings:
+            lines.append(f"  identifier[{column}] = {finding['value']!r}")
+            lines.extend(_fmt_locations(finding["occurrences"]))
     return lines
 
 
-def _identifier_namespace_lines(namespace_issues: dict[str, dict[str, list[dict]]]) -> list[str]:
+def _identifier_namespace_lines(namespace_issues: dict[str, NamespaceIssues]) -> list[str]:
     """Render identifier-to-structure namespace consistency findings.
 
     Parameters
     ----------
-    namespace_issues : dict[str, dict[str, list[dict]]]
+    namespace_issues : dict[str, NamespaceIssues]
         The result of ``checks.identifier_namespace_issues``.
 
     Returns
@@ -789,23 +805,23 @@ def _identifier_namespace_lines(namespace_issues: dict[str, dict[str, list[dict]
                     f"inchikey={structure['inchikey']!r}"
                 )
                 lines.extend(_fmt_locations(structure["occurrences"], indent="        "))
-        for finding in issues["one_structure_multiple_ids"]:
+        for ids_finding in issues["one_structure_multiple_ids"]:
             lines.append(
-                f"  {column}: structure (canonical_smiles={finding['canonical_smiles']!r}, "
-                f"inchikey={finding['inchikey']!r}) -> multiple identifiers"
+                f"  {column}: structure (canonical_smiles={ids_finding['canonical_smiles']!r}, "
+                f"inchikey={ids_finding['inchikey']!r}) -> multiple identifiers"
             )
-            for identifier in finding["identifiers"]:
+            for identifier in ids_finding["identifiers"]:
                 lines.append(f"    identifier={identifier['identifier']!r}")
                 lines.extend(_fmt_locations(identifier["occurrences"], indent="        "))
     return lines
 
 
-def _quality_flag_lines(quality_flags: dict[str, list[dict]]) -> list[str]:
+def _quality_flag_lines(quality_flags: QualityFlags) -> list[str]:
     """Render quality-filter findings (mixtures, salts/metals, suspicious fragments).
 
     Parameters
     ----------
-    quality_flags : dict[str, list[dict]]
+    quality_flags : QualityFlags
         The result of ``quality_flag_entries`` for one pool.
 
     Returns
@@ -814,7 +830,8 @@ def _quality_flag_lines(quality_flags: dict[str, list[dict]]) -> list[str]:
         One block of lines per flagged category with findings.
     """
     lines = []
-    for category, locations in quality_flags.items():
+    for category in QUALITY_FLAG_CATEGORIES:
+        locations = quality_flags[category]
         if not locations:
             continue
         lines.append(f"  {category}:")
@@ -822,7 +839,7 @@ def _quality_flag_lines(quality_flags: dict[str, list[dict]]) -> list[str]:
     return lines
 
 
-def format_report_as_text(report: dict) -> str:
+def format_report_as_text(report: Report) -> str:
     """Render the full audit report as human-readable, indented plain text.
 
     Contains the same findings as the JSON report (exact row indices, source
@@ -831,7 +848,7 @@ def format_report_as_text(report: dict) -> str:
 
     Parameters
     ----------
-    report : dict
+    report : Report
         The report dict, as returned by ``build_report``.
 
     Returns
