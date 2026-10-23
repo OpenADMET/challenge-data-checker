@@ -17,6 +17,16 @@ issues. Built for sequential processing of datasets up to ~10,000 molecules.
   `structure`, `smi`).
 - Parses every SMILES with RDKit, with optional tautomer standardisation, and
   computes canonical SMILES, InChIKey, and a stereo-blind Morgan fingerprint.
+  A SMILES that fails to parse is reported with RDKit's own message and a
+  likely root cause: `empty`, `control_characters`, `truncated`,
+  `placeholder`, `markush`, `stoichiometry_text`, `valence`,
+  `kekulisation`, `ring_closure`, `processing` or `other`. A value that only
+  parses once surrounding whitespace is stripped (e.g. a CXSMILES with a
+  leading space) is kept and flagged. Warnings RDKit logs while parsing a
+  valid SMILES (e.g. conflicting double-bond directions, so that bond's
+  stereo is dropped) are flagged too. A SMILES with a control character
+  inside it, such as an embedded newline, is treated as a failure: RDKit
+  would otherwise silently read only the part before it.
 - **Train-test leakage**: exact matches on raw SMILES, canonical SMILES,
   InChIKey, or any configured identifier column. Stereoisomers and
   racemate/enantiomer pairs (same InChIKey connectivity block, different
@@ -236,6 +246,7 @@ otherwise. Four rules decide the tier:
 | One identifier → several structures | | | FAIL |
 | One structure → several identifiers | | | WARN |
 | Mixtures, salts/metal complexes, suspicious fragments | WARN | WARN | |
+| SMILES that only parses after stripping whitespace; RDKit parse warnings | WARN | WARN | |
 
 Counts are of distinct problems and rows, not of checks that fired: a
 duplicate seen through raw SMILES, canonical SMILES and InChIKey is one

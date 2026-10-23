@@ -10,21 +10,24 @@ def make_processor(**overrides):
 
 
 def test_parse_smiles_valid():
-    mol, error = parse_smiles("CCO")
-    assert mol is not None
-    assert error is None
+    result = parse_smiles("CCO")
+    assert result.mol is not None
+    assert result.error is None
+    assert result.error_category is None
 
 
 def test_parse_smiles_invalid():
-    mol, error = parse_smiles("not_a_smiles(((")
-    assert mol is None
-    assert error is not None
+    result = parse_smiles("not_a_smiles(((")
+    assert result.mol is None
+    assert result.error is not None
+    assert result.error_category is not None
 
 
 def test_parse_smiles_empty_string():
-    mol, error = parse_smiles("")
-    assert mol is None
-    assert "Empty" in error
+    result = parse_smiles("")
+    assert result.mol is None
+    assert "Empty" in result.error
+    assert result.error_category == "empty"
 
 
 def test_process_row_success_fields():

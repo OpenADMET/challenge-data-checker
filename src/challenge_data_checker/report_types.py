@@ -41,11 +41,19 @@ EXACT_REPRESENTATIONS: tuple[Representation, ...] = tuple(
 )
 
 # Per-pool quality-filter categories (see ``report.quality_flag_entries``).
-type QualityFlagCategory = Literal["mixtures", "salts_or_metal_complexes", "suspicious_fragments"]
+type QualityFlagCategory = Literal[
+    "mixtures",
+    "salts_or_metal_complexes",
+    "suspicious_fragments",
+    "smiles_whitespace",
+    "rdkit_warnings",
+]
 QUALITY_FLAG_CATEGORIES: tuple[QualityFlagCategory, ...] = (
     "mixtures",
     "salts_or_metal_complexes",
     "suspicious_fragments",
+    "smiles_whitespace",
+    "rdkit_warnings",
 )
 
 
@@ -69,6 +77,13 @@ class UnparseableEntry(Location):
     """A row whose SMILES could not be parsed or processed."""
 
     error: str
+    category: str
+
+
+class RdkitWarningEntry(Location):
+    """A row whose SMILES parsed, but with a warning from RDKit."""
+
+    warning: str
 
 
 class LeakageFinding(TypedDict):
@@ -156,6 +171,8 @@ class QualityFlags(TypedDict):
     mixtures: list[Location]
     salts_or_metal_complexes: list[Location]
     suspicious_fragments: list[Location]
+    smiles_whitespace: list[Location]
+    rdkit_warnings: list[RdkitWarningEntry]
 
 
 class NamespaceIssueCounts(TypedDict):
@@ -200,6 +217,7 @@ class Summary(TypedDict):
     total_unparseable: int
     total_unparseable_train: int
     total_unparseable_test: int
+    total_unparseable_by_category: dict[str, int]
     total_exact_leaked_train_molecules: int
     total_exact_leaked_test_molecules: int
     total_salt_form_leaked_train_molecules: int
@@ -216,6 +234,8 @@ class Summary(TypedDict):
     total_mixtures: PerPool[int]
     total_salts_or_metal_complexes: PerPool[int]
     total_suspicious_fragments: PerPool[int]
+    total_smiles_whitespace: PerPool[int]
+    total_rdkit_warnings: PerPool[int]
 
 
 class ReportConfig(TypedDict):

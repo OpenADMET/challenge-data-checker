@@ -1,7 +1,8 @@
 """Assembling the audit report (JSON or text) and the stdout summary dashboard."""
 
 import json
-from collections.abc import Iterable, Mapping
+from collections import Counter
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
@@ -51,7 +52,7 @@ from challenge_data_checker.severity import (
 
 
 def quality_flag_entries(records: list[MoleculeRecord]) -> QualityFlags:
-    """Collect quality-filter findings (mixtures, salts/metals, suspicious fragments).
+    """Collect quality-filter findings for one pool.
 
     Parameters
     ----------
@@ -61,9 +62,10 @@ def quality_flag_entries(records: list[MoleculeRecord]) -> QualityFlags:
     Returns
     -------
     QualityFlags
-        A mapping of ``"mixtures"``, ``"salts_or_metal_complexes"``, and
-        ``"suspicious_fragments"`` to the list of matching record
-        locations.
+        A mapping of each quality-flag category (mixtures,
+        salts/metal complexes, suspicious fragments, SMILES only parsed
+        after stripping whitespace, RDKit parse warnings) to the matching
+        record locations.
     """
     return {
         "mixtures": [r.location() for r in records if r.is_parsed and r.is_mixture],
@@ -72,6 +74,14 @@ def quality_flag_entries(records: list[MoleculeRecord]) -> QualityFlags:
         ],
         "suspicious_fragments": [
             r.location() for r in records if r.is_parsed and r.is_suspicious_fragment
+        ],
+        "smiles_whitespace": [
+            r.location() for r in records if r.is_parsed and r.smiles_whitespace_recovered
+        ],
+        "rdkit_warnings": [
+            {**r.location(), "warning": r.rdkit_warning}
+            for r in records
+            if r.is_parsed and r.rdkit_warning is not None
         ],
     }
 
@@ -210,6 +220,9 @@ def build_report(
         "total_unparseable": len(unparseable),
         "total_unparseable_train": sum(1 for r in train_records if not r.is_parsed),
         "total_unparseable_test": sum(1 for r in test_records if not r.is_parsed),
+        "total_unparseable_by_category": dict(
+            sorted(Counter(entry["category"] for entry in unparseable).items())
+        ),
         "total_exact_leaked_train_molecules": exact_train,
         "total_exact_leaked_test_molecules": exact_test,
         "total_salt_form_leaked_train_molecules": salt_form_train,
@@ -246,6 +259,14 @@ def build_report(
         "total_suspicious_fragments": {
             "train": len(quality_train["suspicious_fragments"]),
             "test": len(quality_test["suspicious_fragments"]),
+        },
+        "total_smiles_whitespace": {
+            "train": len(quality_train["smiles_whitespace"]),
+            "test": len(quality_test["smiles_whitespace"]),
+        },
+        "total_rdkit_warnings": {
+            "train": len(quality_train["rdkit_warnings"]),
+            "test": len(quality_test["rdkit_warnings"]),
         },
     }
 
@@ -399,6 +420,11 @@ def _build_summary_lines(report: Report) -> list[str]:
             f"Unparseable SMILES    : total={s['total_unparseable']}  "
             f"(train={s['total_unparseable_train']}, test={s['total_unparseable_test']})"
         ),
+        *(
+            [f"  by category        : {_fmt_counts(s['total_unparseable_by_category'])}"]
+            if s["total_unparseable_by_category"]
+            else []
+        ),
         "",
         "Train-test leakage",
         (
@@ -457,6 +483,8 @@ def _build_summary_lines(report: Report) -> list[str]:
     lines.append(f"  Mixtures/disconnected  : {_fmt_counts(s['total_mixtures'])}")
     lines.append(f"  Salts/metal complexes  : {_fmt_counts(s['total_salts_or_metal_complexes'])}")
     lines.append(f"  Suspicious fragments   : {_fmt_counts(s['total_suspicious_fragments'])}")
+    lines.append(f"  Whitespace in SMILES   : {_fmt_counts(s['total_smiles_whitespace'])}")
+    lines.append(f"  RDKit parse warnings   : {_fmt_counts(s['total_rdkit_warnings'])}")
     lines.append("=" * 60)
     return lines
 
@@ -730,6 +758,8 @@ def _quality_table(s: Summary, context: TierContext) -> Table:
         ("Mixtures/disconnected", s["total_mixtures"], "mixture"),
         ("Salts/metal complexes", s["total_salts_or_metal_complexes"], "salt_or_metal_complex"),
         ("Suspicious fragments", s["total_suspicious_fragments"], "suspicious_fragment"),
+        ("Whitespace in SMILES", s["total_smiles_whitespace"], "smiles_whitespace"),
+        ("RDKit parse warnings", s["total_rdkit_warnings"], "rdkit_warning"),
     ]
     for label, counts, finding_type in rows:
         table.add_row(
@@ -801,7 +831,12 @@ def print_summary(report: Report, report_output: str | Path | None) -> None:
         f"[bold]test[/]={s['total_test_rows']}",
         f"  Unparseable SMILES : "
         f"[{_count_style(s['total_unparseable'])}]{s['total_unparseable']}[/] "
-        f"(train={s['total_unparseable_train']}, test={s['total_unparseable_test']})",
+        f"(train={s['total_unparseable_train']}, test={s['total_unparseable_test']})"
+        + (
+            f" - {_fmt_counts(s['total_unparseable_by_category'])}"
+            if s["total_unparseable_by_category"]
+            else ""
+        ),
         "  Legend             : [bold red]✗ blocking (FAIL)[/]  "
         "[bold yellow]⚠ flagged for review (WARN)[/]  [bold green]✓ clean[/]",
         "",
@@ -863,12 +898,12 @@ def _fmt_location(location: Location) -> str:
     )
 
 
-def _fmt_locations(locations: list[Location], indent: str = "      ") -> list[str]:
+def _fmt_locations(locations: Sequence[Location], indent: str = "      ") -> list[str]:
     """Format a list of record locations as indented lines.
 
     Parameters
     ----------
-    locations : list[Location]
+    locations : Sequence[Location]
         The location dicts to format.
     indent : str
         Prefix to indent each line with.
@@ -1072,7 +1107,13 @@ def _quality_flag_lines(quality_flags: QualityFlags, pool: Literal["train", "tes
             continue
         tag = _tag(QUALITY_FLAG_FINDING_TYPES[category], pool, TierContext())
         lines.append(f"  {tag} {category}:")
-        lines.extend(_fmt_locations(locations, indent="    "))
+        if category == "rdkit_warnings":
+            lines.extend(
+                f"    {_fmt_location(entry)} -- {entry['warning']}"
+                for entry in quality_flags["rdkit_warnings"]
+            )
+        else:
+            lines.extend(_fmt_locations(locations, indent="    "))
     return lines
 
 
@@ -1122,7 +1163,8 @@ def format_report_as_text(report: Report) -> str:
         _section(
             "Unparseable SMILES",
             [
-                f"  {unparseable_tag} {_fmt_location(entry)} -- {entry['error']}"
+                f"  {unparseable_tag} {_fmt_location(entry)} -- "
+                f"{entry['category']}: {entry['error']}"
                 for entry in report["unparseable_smiles"]
             ],
         )

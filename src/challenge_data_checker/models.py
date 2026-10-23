@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 from typing import Any
 
+from challenge_data_checker.parse_errors import ParseErrorCategory
 from challenge_data_checker.quality_filters import FragmentKind
 from challenge_data_checker.report_types import Location
 
@@ -27,8 +28,17 @@ class MoleculeRecord:
         Mapping of identifier column name to its value for this row
         (``None`` if the column was absent or the cell was empty).
     parse_error : str | None
-        Description of why parsing/processing failed, or ``None`` if the
-        row was processed successfully.
+        Description of why parsing/processing failed (RDKit's own message
+        where available), or ``None`` if the row was processed successfully.
+    parse_error_category : ParseErrorCategory | None
+        The failure's likely root cause (see
+        ``parse_errors.classify_parse_failure``), or ``None`` on success.
+    rdkit_warning : str | None
+        A warning RDKit logged while parsing a SMILES that did parse, or
+        ``None``.
+    smiles_whitespace_recovered : bool
+        Whether the SMILES only parsed after stripping leading/trailing
+        whitespace.
     canonical_smiles : str | None
         RDKit canonical SMILES, or ``None`` if unparsed.
     inchikey : str | None
@@ -69,6 +79,9 @@ class MoleculeRecord:
     identifiers: dict[str, str | None] = field(default_factory=dict)
 
     parse_error: str | None = None
+    parse_error_category: ParseErrorCategory | None = None
+    rdkit_warning: str | None = None
+    smiles_whitespace_recovered: bool = False
     canonical_smiles: str | None = None
     inchikey: str | None = None
     fingerprint: Fingerprint | None = None

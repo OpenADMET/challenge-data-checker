@@ -8,6 +8,19 @@ All notable changes to this project are recorded here. The format follows
 
 ### Added
 
+- SMILES parse failures now keep RDKit's own message (e.g. "unclosed ring",
+  "Explicit valence for atom # 1 N, 5, is greater than permitted") instead
+  of a generic "RDKit failed to parse SMILES". Each failure also gets a
+  `category` for its likely root cause: `empty`, `control_characters`,
+  `truncated`, `placeholder`, `markush`, `stoichiometry_text`, `valence`,
+  `kekulisation`, `ring_closure`, `processing` or `other` (#23). The
+  summary gains `total_unparseable_by_category`, and the dashboard and text
+  report show the category with each failure.
+- A SMILES that fails to parse but parses once surrounding whitespace is
+  stripped (e.g. a CXSMILES with a leading space) is now kept, and flagged
+  as `smiles_whitespace` (WARN). Warnings RDKit logs while parsing a valid
+  SMILES (e.g. conflicting double-bond directions, so that bond's stereo is
+  dropped) are flagged as `rdkit_warnings` (WARN), with the message (#23).
 - Tab-separated input: `.tsv` files are now accepted alongside `.csv` and
   `.parquet`, as are gzip-compressed `.csv.gz` and `.tsv.gz`, locally or
   from a URL (#14).
@@ -103,6 +116,14 @@ All notable changes to this project are recorded here. The format follows
   neutralised parent compound (`MoleculeRecord.parent_smiles` /
   `parent_inchikey`) and the classified stripped fragments, ready for
   parent-level leakage matching (#5).
+- A SMILES with a control character inside it (e.g. `"CC\nO"`) is now an
+  unparseable `control_characters` failure. RDKit stops reading at the
+  first whitespace, so it used to be silently read as `CC`.
+- RDKit's logging is now routed through Python's `rdkit` logger
+  (`rdBase.LogToPythonLogger()`) and kept silent, as before, outside the
+  checker's own per-row capture. Processing failures after a successful
+  parse log their traceback at DEBUG (`-v`) and record the exception type
+  (#7).
 - SMILES column aliases now have a preference order (`smiles`,
   `canonical_smiles`, `standardized_smiles`, … `molecule`, `mol`). A file
   with several alias columns (e.g. `smi` and `structure`) used to be an

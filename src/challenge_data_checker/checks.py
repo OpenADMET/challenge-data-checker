@@ -44,7 +44,11 @@ def unparseable_entries(records: list[MoleculeRecord]) -> list[UnparseableEntry]
     list[UnparseableEntry]
         A list of location/error dicts, one per unparseable record.
     """
-    return [{**r.location(), "error": r.parse_error} for r in records if r.parse_error is not None]
+    return [
+        {**r.location(), "error": r.parse_error, "category": r.parse_error_category or "other"}
+        for r in records
+        if r.parse_error is not None
+    ]
 
 
 def _index_by(records: list[MoleculeRecord], key_func: KeyFunc) -> dict[str, list[MoleculeRecord]]:

@@ -96,6 +96,8 @@ TIERS: dict[str, TierRule] = {
     "mixture": Severity.WARN,
     "salt_or_metal_complex": Severity.WARN,
     "suspicious_fragment": Severity.WARN,
+    "smiles_whitespace": Severity.WARN,
+    "rdkit_warning": Severity.WARN,
 }
 
 # Finding type for each per-pool quality-flag category in the report.
@@ -103,6 +105,8 @@ QUALITY_FLAG_FINDING_TYPES: dict[str, str] = {
     "mixtures": "mixture",
     "salts_or_metal_complexes": "salt_or_metal_complex",
     "suspicious_fragments": "suspicious_fragment",
+    "smiles_whitespace": "smiles_whitespace",
+    "rdkit_warnings": "rdkit_warning",
 }
 
 
