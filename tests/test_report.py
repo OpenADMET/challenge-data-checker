@@ -1,9 +1,9 @@
 import json
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from challenge_data_checker.config import Config, ColumnsConfig, PathsConfig, SettingsConfig
+from challenge_data_checker.config import ColumnsConfig, Config, PathsConfig, SettingsConfig
 from challenge_data_checker.models import MoleculeRecord
 from challenge_data_checker.report import (
     build_report,
@@ -93,13 +93,14 @@ def test_build_report_resolved_smiles_columns_defaults_to_empty(tmp_path):
 
 def test_build_report_generated_at_is_a_valid_recent_timestamp(tmp_path):
     config = make_config(tmp_path)
-    before = datetime.now().astimezone().replace(microsecond=0)
+    before = datetime.now(UTC).replace(microsecond=0)
 
     report = build_report(config, [], [], [])
 
-    after = datetime.now().astimezone()
+    after = datetime.now(UTC)
     generated_at = datetime.fromisoformat(report["generated_at"])
     assert before <= generated_at <= after
+    assert generated_at.utcoffset() == timedelta(0)
 
 
 def test_save_report_writes_valid_json(tmp_path):

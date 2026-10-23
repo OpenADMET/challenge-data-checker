@@ -1,8 +1,10 @@
 import json
+from importlib.metadata import version
 
 import pandas as pd
 import pytest
 
+import challenge_data_checker
 from challenge_data_checker import audit
 from challenge_data_checker.api import audit as audit_from_module
 
@@ -28,6 +30,10 @@ def train_test_dfs():
 
 def test_audit_is_exported_from_package_root():
     assert audit is audit_from_module
+
+
+def test_version_matches_installed_package_metadata():
+    assert challenge_data_checker.__version__ == version("challenge-data-checker")
 
 
 def test_audit_accepts_dataframes_directly(train_test_dfs):

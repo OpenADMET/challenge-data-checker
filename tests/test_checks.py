@@ -1,6 +1,7 @@
 from rdkit import Chem
 from rdkit.Chem import rdFingerprintGenerator
 
+from challenge_data_checker import checks
 from challenge_data_checker.checks import (
     identifier_leakage,
     identifier_namespace_issues,
@@ -182,3 +183,20 @@ def test_tanimoto_leakage_below_threshold_not_flagged():
     ]
     result = tanimoto_leakage(train, test, threshold=0.9)
     assert result == []
+
+
+def test_tanimoto_leakage_warns_when_pair_count_is_large(monkeypatch, caplog):
+    monkeypatch.setattr(checks, "TANIMOTO_PAIR_WARNING_THRESHOLD", 0)
+    train = [make_record("train", "f.csv", 0, "CCO", "CCO", "IK1", fingerprint=fp("CCO"))]
+    test = [make_record("test", "f.csv", 0, "CCN", "CCN", "IK2", fingerprint=fp("CCN"))]
+    with caplog.at_level("WARNING", logger="challenge_data_checker.checks"):
+        tanimoto_leakage(train, test, threshold=1.0)
+    assert "1 train x 1 test pairs" in caplog.text
+
+
+def test_tanimoto_leakage_does_not_warn_for_small_pools(caplog):
+    train = [make_record("train", "f.csv", 0, "CCO", "CCO", "IK1", fingerprint=fp("CCO"))]
+    test = [make_record("test", "f.csv", 0, "CCN", "CCN", "IK2", fingerprint=fp("CCN"))]
+    with caplog.at_level("WARNING", logger="challenge_data_checker.checks"):
+        tanimoto_leakage(train, test, threshold=1.0)
+    assert caplog.text == ""

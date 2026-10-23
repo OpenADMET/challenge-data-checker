@@ -1,8 +1,8 @@
 """File loading, pooling, and fuzzy column resolution."""
 
 import logging
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 import pandas as pd
 

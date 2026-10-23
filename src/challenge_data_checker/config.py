@@ -1,9 +1,9 @@
 """TOML configuration loading and validation for challenge-data-checker."""
 
 import tomllib
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Sequence
 
 from challenge_data_checker.io_utils import DataSource
 

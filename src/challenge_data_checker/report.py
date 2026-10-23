@@ -1,7 +1,7 @@
 """Assembling the audit report (JSON or text) and the stdout summary dashboard."""
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from rich import box
@@ -106,7 +106,7 @@ def build_report(
         counts, and the detailed findings from every check.
     """
     resolved_smiles_columns = resolved_smiles_columns or {"train": {}, "test": {}}
-    generated_at = datetime.now().astimezone().isoformat(timespec="seconds")
+    generated_at = datetime.now(UTC).isoformat(timespec="seconds")
     all_records = train_records + test_records
 
     unparseable = unparseable_entries(all_records)

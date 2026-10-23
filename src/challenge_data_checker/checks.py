@@ -1,13 +1,21 @@
 """Leakage, duplicate, and identifier-namespace consistency checks."""
 
+import logging
 from collections import defaultdict
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from rdkit import DataStructs
 
 from challenge_data_checker.models import MoleculeRecord
 
+logger = logging.getLogger(__name__)
+
 KeyFunc = Callable[[MoleculeRecord], str | None]
+
+# Above this many train x test pairs the all-pairs Tanimoto check gets slow
+# (roughly a 10k x 10k split); warn so a long run isn't mistaken for a hang.
+TANIMOTO_PAIR_WARNING_THRESHOLD = 100_000_000
 
 
 def unparseable_entries(records: list[MoleculeRecord]) -> list[dict]:
@@ -325,11 +333,21 @@ def tanimoto_leakage(
     if not train_valid or not test_valid:
         return []
 
+    n_pairs = len(train_valid) * len(test_valid)
+    if n_pairs > TANIMOTO_PAIR_WARNING_THRESHOLD:
+        logger.warning(
+            "Computing Tanimoto similarity for %d train x %d test pairs (%d total); "
+            "this may take a while.",
+            len(train_valid),
+            len(test_valid),
+            n_pairs,
+        )
+
     test_fps = [r.fingerprint for r in test_valid]
     findings = []
     for train_rec in train_valid:
         similarities = DataStructs.BulkTanimotoSimilarity(train_rec.fingerprint, test_fps)
-        for test_rec, similarity in zip(test_valid, similarities):
+        for test_rec, similarity in zip(test_valid, similarities, strict=True):
             if similarity < threshold:
                 continue
             if train_rec.inchikey is not None and train_rec.inchikey == test_rec.inchikey:

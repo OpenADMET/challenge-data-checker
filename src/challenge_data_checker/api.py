@@ -5,8 +5,8 @@ as file paths and/or already-loaded pandas DataFrames, mixed freely, and get
 the same report dict the CLI produces, without needing files on disk.
 """
 
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 import pandas as pd
 
