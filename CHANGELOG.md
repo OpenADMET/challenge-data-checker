@@ -29,6 +29,12 @@ All notable changes to this project are recorded here. The format follows
   newest dependencies, and Python 3.12 with the declared minimum versions.
 - `environment.yml`: `rich` moved from the dev tools to the runtime
   dependencies, and its pin updated from 13.6.0 to 15.0.0.
+- The suspicious-fragment check (≤3 heavy atoms) no longer flags
+  legitimate small molecules on a new allowlist: methanol, ethanol,
+  acetonitrile, formaldehyde, acetaldehyde, formic acid, formamide, simple
+  amines and ethers, small hydrocarbons, halomethanes, dichloromethane,
+  methanethiol, CO₂ and CS₂ (#3). Bare `C`, `C#N`, lone ions and lone
+  heteroatoms (e.g. water) are still flagged.
 - The report's `generated_at` timestamp is now in UTC (`+00:00`) instead of
   the machine's local time zone.
 - `__version__` is read from the installed package metadata, so

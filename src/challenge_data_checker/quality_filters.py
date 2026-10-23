@@ -127,6 +127,43 @@ COUNTERION_CANONICAL_SMILES = {
     c for smi in _COUNTERION_SMILES_RAW if (c := _canonical(smi)) is not None
 }
 
+# Legitimate small molecules (<=3 heavy atoms, containing carbon) that would
+# otherwise trip the suspicious-fragment size check: common solvents, simple
+# reagents, and small entries in solubility or fragment-screening datasets.
+# Bare "C" and "C#N" are deliberately absent: as standalone entries they are
+# more likely stripped-pipeline artefacts (see _COUNTERION_SMILES_RAW).
+_SMALL_MOLECULE_ALLOWLIST_RAW = {
+    "CO",  # methanol
+    "CCO",  # ethanol
+    "CC#N",  # acetonitrile
+    "C=O",  # formaldehyde
+    "CC=O",  # acetaldehyde
+    "O=CO",  # formic acid
+    "NC=O",  # formamide
+    "CN",  # methylamine
+    "CCN",  # ethylamine
+    "CNC",  # dimethylamine
+    "COC",  # dimethyl ether
+    "C1CO1",  # ethylene oxide
+    "CC",  # ethane
+    "CCC",  # propane
+    "C=C",  # ethylene
+    "C=CC",  # propene
+    "C#C",  # acetylene
+    "CF",  # fluoromethane
+    "CCl",  # chloromethane
+    "CBr",  # bromomethane
+    "CI",  # iodomethane
+    "ClCCl",  # dichloromethane
+    "CS",  # methanethiol
+    "O=C=O",  # carbon dioxide
+    "S=C=S",  # carbon disulfide
+}
+
+SMALL_MOLECULE_ALLOWLIST_CANONICAL_SMILES = {
+    c for smi in _SMALL_MOLECULE_ALLOWLIST_RAW if (c := _canonical(smi)) is not None
+}
+
 
 def has_multiple_fragments(mol: Chem.Mol, raw_smiles: str) -> bool:
     """Check whether a molecule is a mixture of multiple disconnected fragments.
@@ -194,7 +231,9 @@ def is_suspicious_small_fragment(mol: Chem.Mol, heavy_atom_count: int) -> bool:
 
     Flags small entries (<=3 heavy atoms) such as a bare cyanide, isolated
     methyl group, or lone counterion left behind by a naive/failed
-    preprocessing pipeline.
+    preprocessing pipeline. Legitimate small molecules on the allowlist
+    (methanol, ethanol, acetonitrile, ...; see
+    ``SMALL_MOLECULE_ALLOWLIST_CANONICAL_SMILES``) are not flagged.
 
     Parameters
     ----------
@@ -210,6 +249,8 @@ def is_suspicious_small_fragment(mol: Chem.Mol, heavy_atom_count: int) -> bool:
         ``False`` otherwise.
     """
     if heavy_atom_count > 3:
+        return False
+    if Chem.MolToSmiles(mol, canonical=True) in SMALL_MOLECULE_ALLOWLIST_CANONICAL_SMILES:
         return False
     has_carbon = any(atom.GetSymbol() == "C" for atom in mol.GetAtoms())
     return has_carbon or heavy_atom_count <= 1

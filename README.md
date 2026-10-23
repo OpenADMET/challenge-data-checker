@@ -29,7 +29,9 @@ issues. Built for sequential processing of datasets up to ~10,000 molecules.
 - **Quality filters**: mixtures/disconnected fragments, salts and metal
   complexes, and suspicious tiny fragments that look like stripped
   degradation artefacts (e.g. a bare cyanide left over from a failed
-  preprocessing pipeline).
+  preprocessing pipeline). Common small molecules such as methanol,
+  ethanol, acetonitrile and dichloromethane are allowlisted and not
+  flagged.
 - Prints a scannable summary dashboard to stdout and writes a detailed report
   (JSON or plain text) with exact row indices, file paths, and pairwise
   similarity scores for every flagged issue.
