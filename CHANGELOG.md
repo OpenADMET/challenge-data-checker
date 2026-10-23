@@ -19,6 +19,16 @@ All notable changes to this project are recorded here. The format follows
 
 ### Changed
 
+- **Breaking (dependency floors):** dependencies now declare tested lower
+  bounds: `pandas>=2.2`, `numpy>=1.26`, `rdkit>=2024.3`, `rich>=13`, and in
+  the extras `pyarrow>=14`, `huggingface_hub>=0.24`, `requests>=2.31`,
+  `pytest>=8`, `pytest-cov>=5`. Environments with older versions will be
+  upgraded, or refuse to install.
+- Python 3.13, 3.14 and 3.15 are now supported: the `<3.13` cap on
+  `requires-python` is removed. CI tests every supported Python with the
+  newest dependencies, and Python 3.12 with the declared minimum versions.
+- `environment.yml`: `rich` moved from the dev tools to the runtime
+  dependencies, and its pin updated from 13.6.0 to 15.0.0.
 - The report's `generated_at` timestamp is now in UTC (`+00:00`) instead of
   the machine's local time zone.
 - `__version__` is read from the installed package metadata, so

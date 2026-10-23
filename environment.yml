@@ -9,6 +9,7 @@ dependencies:
   - pyarrow=24.0.0
   - python=3.12.13
   - rdkit=2026.03.3
+  - rich=15.0.0
   # Dev / testing tools
   - black=26.5.1
   - ipykernel=7.3.0
@@ -16,6 +17,5 @@ dependencies:
   - pytest=9.1.1
   - pytest-cov=7.1.0
   - ruff=0.15.20
-  - rich=13.6.0
   - pip:
     - pydoclint==0.9.1            # not on conda-forge

@@ -36,8 +36,20 @@ issues. Built for sequential processing of datasets up to ~10,000 molecules.
 
 ## Installation
 
-Requires Python 3.12. Create and activate the conda environment, then install
-the package in editable mode:
+Requires Python 3.12 or newer. Supported versions and dependency ranges are at
+least as wide as [SPEC 0](https://scientific-python.org/specs/spec-0000/)
+recommends. CI tests Python
+3.12–3.15 with the newest dependencies, and Python 3.12 with the lowest
+versions `pyproject.toml` allows (pandas 2.2, numpy 1.26, RDKit 2024.03).
+
+Install into any environment with pip:
+
+```bash
+pip install -e ".[parquet,test,remote]"
+```
+
+For development, the conda environment pins exact versions of every
+dependency and tool (it's what CI's lint and type-check job uses):
 
 ```bash
 conda env create -f environment.yml
