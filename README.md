@@ -27,12 +27,17 @@ issues. Built for sequential processing of datasets up to ~10,000 molecules.
 - **Identifier namespace checks**: flags an identifier that maps to more than
   one structure, or a structure that's given more than one identifier, within
   the same identifier column.
-- **Quality filters**: mixtures/disconnected fragments, salts and metal
-  complexes, and suspicious tiny fragments that look like stripped
+- **Quality filters**: mixtures/disconnected fragments, salts, solvates and
+  metal complexes, and suspicious tiny fragments that look like stripped
   degradation artefacts (e.g. a bare cyanide left over from a failed
   preprocessing pipeline). Common small molecules such as methanol,
   ethanol, acetonitrile and dichloromethane are allowlisted and not
-  flagged.
+  flagged. A salt or solvate is a parent compound whose other fragments
+  are all known counterions or solvents, drawn either ionic or neutral
+  (e.g. `.[Cl-]` or `.Cl`, TFA, mesylate, maleate, citrate, hydrates and
+  common crystallisation solvents). The parent is the largest fragment
+  that isn't a known counterion or solvent, neutralised, so a large
+  counterion such as pamoate is never mistaken for the compound.
 - Prints a scannable summary dashboard to stdout and writes a detailed report
   (JSON or plain text) with exact row indices, file paths, and pairwise
   similarity scores for every flagged issue.
@@ -210,6 +215,13 @@ ruff check src tests         # lint
 mypy src                     # type check
 pydoclint src                # docstring style/consistency check
 ```
+
+The chemistry helpers (parsing, standardisation, counterion and solvent
+recognition) live in this package rather than coming from
+`openadmet.toolkit`. That's deliberate: the checker's salt and parent
+handling is tuned for leakage detection and differs from the toolkit's
+general-purpose standardisation, and keeping it here keeps the
+dependencies light for a standalone tool.
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full contribution workflow, including
 how we use the [Developer Certificate of Origin](https://developercertificate.org/)

@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 from typing import Any
 
+from challenge_data_checker.quality_filters import FragmentKind
 from challenge_data_checker.report_types import Location
 
 Fingerprint = Any  # rdkit.DataStructs.cDataStructs.ExplicitBitVect
@@ -34,6 +35,16 @@ class MoleculeRecord:
         InChIKey, or ``None`` if unparsed or InChIKey generation failed.
     fingerprint : Fingerprint | None
         Stereo-blind Morgan fingerprint, or ``None`` if unparsed.
+    parent_smiles : str | None
+        Canonical SMILES of the neutralised parent compound once known
+        counterions and solvents are stripped (see
+        ``quality_filters.classify_fragments``), or ``None`` if unparsed.
+    parent_inchikey : str | None
+        InChIKey of the parent compound, or ``None`` if unparsed or
+        InChIKey generation failed.
+    stripped_fragments : list[tuple[str, FragmentKind]]
+        Canonical SMILES and kind (``"counterion"``, ``"solvent"`` or
+        ``"unknown"``) of every fragment other than the parent.
     heavy_atom_count : int | None
         Number of heavy atoms, or ``None`` if unparsed.
     num_fragments : int | None
@@ -45,7 +56,7 @@ class MoleculeRecord:
     is_mixture : bool
         Whether the molecule has multiple disconnected fragments.
     is_salt_or_metal : bool
-        Whether the molecule is a salt or metal complex.
+        Whether the molecule is a salt, solvate or metal complex.
     is_suspicious_fragment : bool
         Whether the molecule looks like a stripped degradation artefact
         (e.g. a bare counterion).
@@ -61,6 +72,9 @@ class MoleculeRecord:
     canonical_smiles: str | None = None
     inchikey: str | None = None
     fingerprint: Fingerprint | None = None
+    parent_smiles: str | None = None
+    parent_inchikey: str | None = None
+    stripped_fragments: list[tuple[str, FragmentKind]] = field(default_factory=list)
 
     heavy_atom_count: int | None = None
     num_fragments: int | None = None

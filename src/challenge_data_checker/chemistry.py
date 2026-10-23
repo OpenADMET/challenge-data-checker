@@ -12,9 +12,9 @@ from challenge_data_checker.config import SettingsConfig
 from challenge_data_checker.io_utils import RESOLVED_SMILES_COL, ROW_INDEX_COL, SOURCE_FILE_COL
 from challenge_data_checker.models import Fingerprint, MoleculeRecord
 from challenge_data_checker.quality_filters import (
+    classify_fragments,
     contains_metal,
     has_multiple_fragments,
-    is_salt_or_metal_complex,
     is_suspicious_small_fragment,
 )
 
@@ -190,7 +190,20 @@ class MoleculeProcessor:
             record.has_dot = "." in raw_smiles
             record.contains_metal = contains_metal(mol)
             record.is_mixture = has_multiple_fragments(mol, raw_smiles)
-            record.is_salt_or_metal = is_salt_or_metal_complex(mol)
+
+            fragments = classify_fragments(mol)
+            record.stripped_fragments = list(fragments.stripped)
+            record.is_salt_or_metal = record.contains_metal or fragments.is_salt_or_solvate
+            parent = fragments.parent
+            if Chem.MolToSmiles(parent) == record.canonical_smiles:
+                # Already a single neutral fragment: reuse the work done above.
+                record.parent_smiles = record.canonical_smiles
+                record.parent_inchikey = record.inchikey
+            else:
+                # Neutralising can change the tautomer, so re-standardise.
+                parent = self.standardise(parent)
+                record.parent_smiles = self.canonical_smiles(parent)
+                record.parent_inchikey = self.inchikey(parent)
             record.is_suspicious_fragment = is_suspicious_small_fragment(
                 mol, record.heavy_atom_count
             )

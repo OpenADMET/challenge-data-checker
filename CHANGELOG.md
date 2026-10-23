@@ -34,6 +34,24 @@ All notable changes to this project are recorded here. The format follows
   newest dependencies, and Python 3.12 with the declared minimum versions.
 - `environment.yml`: `rich` moved from the dev tools to the runtime
   dependencies, and its pin updated from 13.6.0 to 15.0.0.
+- Salt and solvate recognition rewritten (#20). Counterions are now
+  recognised whether drawn ionic or as the neutral acid/base (`.Cl`, `.Br`,
+  TFA, mesylate, maleate, citrate, tartrate, pamoate, …), and hydrates and
+  common crystallisation solvents are recognised. An entry is flagged under
+  `salts_or_metal_complexes` when it contains a metal, or when it is a
+  parent compound whose other fragments are all known counterions or
+  solvents. Behaviour changes:
+  - neutral-acid salts and hydrates (e.g. `CCN(CC)CC.Cl`) are now flagged
+  - a lone counterion entry (e.g. a bare `C#N`) is no longer flagged as a
+    salt; it is still a suspicious fragment
+  - an entry made only of counterion-like fragments with no parent compound
+    (e.g. `CC(=O)O.CC(=O)O`) is no longer flagged as a salt
+  - an entry with an unrecognised extra fragment alongside a counterion is
+    no longer flagged as a salt; it is still a mixture
+- Every processed row now records its salt- and solvent-stripped,
+  neutralised parent compound (`MoleculeRecord.parent_smiles` /
+  `parent_inchikey`) and the classified stripped fragments, ready for
+  parent-level leakage matching (#5).
 - SMILES column aliases now have a preference order (`smiles`,
   `canonical_smiles`, `standardized_smiles`, … `molecule`, `mol`). A file
   with several alias columns (e.g. `smi` and `structure`) used to be an

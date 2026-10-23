@@ -77,13 +77,14 @@ def test_run_end_to_end_report_contents(mock_dataset):
 
     # quality filters:
     # - mixtures: the diacetic acid dimer and NaCl (both contain a ".") -> 2
-    # - salts/metals: NaCl (metal) and the bare cyanide (matches the counterion
-    #   list used to catch stripped-metal-complex artefacts) -> 2
+    # - salts/metals: NaCl (metal) -> 1. The bare cyanide is a lone fragment
+    #   (a suspicious fragment, not a salt), and the diacetic acid dimer has no
+    #   parent compound, only counterion-like fragments.
     # - suspicious tiny fragments: only the bare cyanide; ethanol (CCO) is on
     #   the small-molecule allowlist -> 1
     quality_train = report["quality_flags"]["train"]
     assert len(quality_train["mixtures"]) == 2
-    assert len(quality_train["salts_or_metal_complexes"]) == 2
+    assert len(quality_train["salts_or_metal_complexes"]) == 1
     assert len(quality_train["suspicious_fragments"]) == 1
 
     # report file written to disk
