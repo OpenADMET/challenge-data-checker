@@ -48,6 +48,33 @@ All notable changes to this project are recorded here. The format follows
 
 ### Changed
 
+- **Breaking: severity tiers and a three-state result (#11, #4).** Every
+  finding is now either blocking (`FAIL`) or flagged for review (`WARN`),
+  following four rules:
+  - chemistry errors always FAIL
+  - data-curation issues WARN in train and FAIL in test
+  - exact leakage FAILs and non-exact leakage WARNs
+  - heuristic quality flags WARN
+
+  The README has the full table. The overall result is `PASS`, `WARN` or
+  `FAIL` instead of `PASS`/`FAIL`, so, for example, duplicates within the
+  training set or a racemate/enantiomer pair across pools no longer fail an
+  audit on their own.
+  - New report fields: `summary.status`, `summary.blocking` and
+    `summary.flagged`, with `findings`, `rows` and a `by_type` breakdown.
+  - Findings are counted as distinct problems and rows, not as checks that
+    fired: one duplicate seen through raw SMILES, canonical SMILES and
+    InChIKey is one finding (#4). The old banner ("N issue(s) flagged") is
+    replaced by blocking and flagged finding and row counts.
+  - The dashboard colours each count by tier (red ✗ blocking, yellow ⚠
+    flagged) and adds a findings-by-severity table. Text report findings
+    are tagged `[FAIL]` or `[WARN]`.
+  - **CLI exit codes:** `2` when the result is `FAIL`, or `WARN` with the
+    new `--strict` flag. `1` still means a configuration or input error.
+    Previously the CLI exited `0` whenever the audit ran.
+  - The Tanimoto check is WARN at the default threshold of `1.0`, where it
+    only catches fingerprint collisions, and FAIL when you lower the
+    threshold.
 - **Breaking (dependency floors):** dependencies now declare tested lower
   bounds: `pandas>=2.2`, `numpy>=1.26`, `rdkit>=2024.3`, `rich>=13`, and in
   the extras `pyarrow>=14`, `huggingface_hub>=0.24`, `requests>=2.31`,

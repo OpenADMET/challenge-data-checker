@@ -165,9 +165,36 @@ class NamespaceIssueCounts(TypedDict):
     one_structure_multiple_ids: int
 
 
+# Overall audit result: FAIL if any blocking finding, WARN if only flagged
+# findings, PASS if nothing was found.
+type Status = Literal["PASS", "WARN", "FAIL"]
+
+
+class TypeCounts(TypedDict):
+    """Counts for one finding type within a severity tier."""
+
+    findings: int
+    rows: int
+
+
+class TierSummary(TypedDict):
+    """Counts for one severity tier (blocking or flagged).
+
+    ``findings`` counts distinct problems (one duplicate seen through several
+    representations counts once); ``rows`` counts distinct affected rows.
+    """
+
+    findings: int
+    rows: int
+    by_type: dict[str, TypeCounts]
+
+
 class Summary(TypedDict):
     """Headline counts for every check."""
 
+    status: Status
+    blocking: TierSummary
+    flagged: TierSummary
     total_train_rows: int
     total_test_rows: int
     total_unparseable: int

@@ -106,7 +106,9 @@ def audit(
     Report
         The full report dict (same shape as the CLI's report file/the
         JSON written by ``report.save_report``), regardless of
-        ``report_output``/``print_report``.
+        ``report_output``/``print_report``. ``report["summary"]["status"]``
+        is the overall result: ``"PASS"``, ``"WARN"`` (flagged findings
+        only) or ``"FAIL"`` (blocking findings).
     """
     config = Config(
         paths=PathsConfig(

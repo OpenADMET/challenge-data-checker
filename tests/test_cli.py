@@ -99,9 +99,41 @@ def test_main_prints_dashboard(mock_dataset, capsys):
     exit_code = main([str(config_path)])
     captured = capsys.readouterr()
 
-    assert exit_code == 0
+    # The fixture has train/test leakage, a blocking finding.
+    assert exit_code == 2
     assert "challenge-data-checker audit summary" in captured.out
     assert "Rows processed" in captured.out
+    assert "OVERALL FAIL" in captured.out
+
+
+def _write_pair(tmp_path, train_smiles, test_smiles):
+    (tmp_path / "train.csv").write_text("SMILES\n" + "\n".join(train_smiles) + "\n")
+    (tmp_path / "test.csv").write_text("SMILES\n" + "\n".join(test_smiles) + "\n")
+    config = tmp_path / "config.toml"
+    config.write_text(f"""[paths]
+train_files = ["{tmp_path / "train.csv"}"]
+test_files = ["{tmp_path / "test.csv"}"]
+report_output = "{tmp_path / "report.json"}"
+
+[columns]
+smiles_column = "SMILES"
+""")
+    return str(config)
+
+
+@pytest.mark.parametrize(
+    ("train", "test", "strict", "expected"),
+    [
+        (["c1ccccc1CCN"], ["c1ccccc1CCO"], False, 0),  # PASS
+        (["c1ccccc1CCN"], ["c1ccccc1CCO"], True, 0),  # PASS, strict
+        (["c1ccccc1CCN", "c1ccccc1CCN"], ["c1ccccc1CCO"], False, 0),  # WARN: train duplicate
+        (["c1ccccc1CCN", "c1ccccc1CCN"], ["c1ccccc1CCO"], True, 2),  # WARN, strict
+        (["c1ccccc1CCN"], ["c1ccccc1CCN"], False, 2),  # FAIL: exact overlap
+    ],
+)
+def test_main_exit_code_follows_status(tmp_path, capsys, train, test, strict, expected):
+    argv = [_write_pair(tmp_path, train, test)] + (["--strict"] if strict else [])
+    assert main(argv) == expected
 
 
 def test_main_returns_error_code_for_bad_config(tmp_path, capsys):

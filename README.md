@@ -84,6 +84,16 @@ challenge-data-checker path/to/config.toml
 Add `-v`/`--verbose` for debug-level logging (e.g. to see every identifier
 column warning).
 
+Exit codes, so CI can gate on the result:
+
+| Code | Meaning |
+|---|---|
+| `0` | `PASS`, or `WARN` (flagged findings only) |
+| `1` | The audit couldn't run: configuration or input error |
+| `2` | `FAIL` (blocking findings), or `WARN` when run with `--strict` |
+
+Pass `--strict` to also fail on flagged (`WARN`) findings.
+
 ### Configuration file
 
 ```toml
@@ -199,12 +209,46 @@ file path would otherwise appear.
 
 ## Output
 
+### Severity tiers
+
+Every finding is either **blocking** (`FAIL`: the split shouldn't be released
+as is) or **flagged** (`WARN`: a human should check it). The overall status
+is `FAIL` if anything is blocking, `WARN` if anything is flagged, and `PASS`
+otherwise. Four rules decide the tier:
+
+1. Chemistry errors always FAIL, in both pools.
+2. Data-curation issues depend on the pool: WARN in train (a training set
+   may combine sources or hold replicates the user has to resolve), FAIL in
+   test (the test set must be scoreable ground truth).
+3. Exact leakage is FAIL; non-exact leakage is WARN.
+4. Heuristic quality flags are WARN.
+
+| Finding | Train | Test | Train/test |
+|---|---|---|---|
+| Unparseable SMILES | FAIL | FAIL | |
+| Exact overlap (raw / canonical SMILES, InChIKey) | | | FAIL |
+| Same parent compound, different salt form (`strip_salts`) | | | FAIL |
+| Identifier overlap | | | FAIL |
+| Same connectivity, different stereochemistry | | | WARN |
+| Tanimoto similarity ≥ threshold | | | WARN at the default `1.0`; FAIL if you lower it |
+| Duplicate structure, salt form or identifier | WARN | FAIL | |
+| Duplicate stereoisomer (e.g. racemate and enantiomer) | WARN | WARN | |
+| One identifier → several structures | | | FAIL |
+| One structure → several identifiers | | | WARN |
+| Mixtures, salts/metal complexes, suspicious fragments | WARN | WARN | |
+
+Counts are of distinct problems and rows, not of checks that fired: a
+duplicate seen through raw SMILES, canonical SMILES and InChIKey is one
+finding. The report's `summary.status`, `summary.blocking` and
+`summary.flagged` give the status and the per-tier counts (`findings`,
+`rows`, and a breakdown `by_type`).
+
 **stdout**: a colour-coded (via [rich](https://github.com/Textualize/rich))
-summary dashboard with row counts, unparseable SMILES, and one table per
-check category (exact/Tanimoto leakage, internal duplicates, identifier
-namespace issues, quality filters) — green checkmarks for clean results, red
-crosses with counts for flagged findings — followed by an overall PASS/FAIL
-banner.
+summary dashboard with row counts, unparseable SMILES, a findings-by-severity
+table, and one table per check category (leakage, internal duplicates,
+identifier namespace issues, quality filters): green checkmarks for clean
+results, red crosses for blocking findings, yellow warning signs for flagged
+ones. It ends with an overall PASS / WARN / FAIL banner.
 
 **Report file** (written to `paths.report_output`, in the format chosen by
 `settings.report_format`): the full detail behind every summary count,
@@ -214,9 +258,10 @@ every flagged finding.
 - `"json"` — a single machine-readable JSON document, suitable for
   programmatic parsing or diffing between runs.
 - `"txt"` — the same information as readable, indented plain text (config,
-  summary dashboard, then one section per check with each finding rendered
-  as `[pool] file (row N): 'raw_smiles'` lines), suitable for a human to
-  scan or paste into an issue/PR.
+  summary dashboard, then one section per check with each finding tagged
+  `[FAIL]` or `[WARN]` and its rows rendered as
+  `[pool] file (row N): 'raw_smiles'` lines), suitable for a human to scan or
+  paste into an issue/PR.
 
 ## Development
 
