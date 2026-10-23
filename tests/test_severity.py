@@ -118,7 +118,7 @@ def test_quality_flags_only_warn():
     report = audit(rows("c1ccccc1CCN.Cl"), rows("C#N"))
     s = report["summary"]
     assert s["status"] == "WARN"
-    assert set(s["flagged"]["by_type"]) >= {"salt_or_metal_complex", "suspicious_fragment"}
+    assert set(s["flagged"]["by_type"]) >= {"salt_or_solvate", "suspicious_fragment"}
 
 
 def test_one_id_multiple_structures_fails_and_one_structure_multiple_ids_warns():

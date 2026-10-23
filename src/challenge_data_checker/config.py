@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from challenge_data_checker.io_utils import DataSource
+from challenge_data_checker.quality_filters import DEFAULT_MULTI_COMPONENT_MIN_HEAVY_ATOMS
 
 
 class ConfigError(ValueError):
@@ -71,6 +72,9 @@ class SettingsConfig:
         Whether identifier values that differ only in letter case count as
         the same identifier. Off by default; case-only differences are
         then still reported as near-duplicate identifiers (WARN).
+    multi_component_min_heavy_atoms : int
+        Minimum heavy atoms for an unrecognised fragment to count as a
+        separate compound in the ``multi_component`` quality flag.
     max_train_test_similarity : float
         Tanimoto similarity threshold (0.0-1.0) at or above which a
         train/test pair is flagged as possible leakage.
@@ -88,6 +92,7 @@ class SettingsConfig:
     tautomer_standardisation: bool = False
     strip_salts: bool = True
     identifier_case_insensitive: bool = False
+    multi_component_min_heavy_atoms: int = DEFAULT_MULTI_COMPONENT_MIN_HEAVY_ATOMS
     max_train_test_similarity: float = 1.0
     fp_radius: int = 2
     fp_n_bits: int = 2048
@@ -265,6 +270,11 @@ def load_config(config_path: str | Path) -> Config:
         tautomer_standardisation=bool(settings_raw.get("tautomer_standardisation", False)),
         strip_salts=bool(settings_raw.get("strip_salts", True)),
         identifier_case_insensitive=bool(settings_raw.get("identifier_case_insensitive", False)),
+        multi_component_min_heavy_atoms=int(
+            settings_raw.get(
+                "multi_component_min_heavy_atoms", DEFAULT_MULTI_COMPONENT_MIN_HEAVY_ATOMS
+            )
+        ),
         max_train_test_similarity=float(settings_raw.get("max_train_test_similarity", 1.0)),
         fp_radius=int(settings_raw.get("fp_radius", 2)),
         fp_n_bits=int(settings_raw.get("fp_n_bits", 2048)),
@@ -275,6 +285,11 @@ def load_config(config_path: str | Path) -> Config:
         raise ConfigError(
             "'max_train_test_similarity' must be between 0.0 and 1.0, "
             f"got {settings.max_train_test_similarity}."
+        )
+    if settings.multi_component_min_heavy_atoms < 1:
+        raise ConfigError(
+            "'multi_component_min_heavy_atoms' must be >= 1, "
+            f"got {settings.multi_component_min_heavy_atoms}."
         )
     if settings.fp_radius < 0:
         raise ConfigError(f"'fp_radius' must be >= 0, got {settings.fp_radius}.")

@@ -123,7 +123,7 @@ def test_whitespace_recovery_and_rdkit_warnings_only_warn():
     s = report["summary"]
     assert s["status"] == "WARN"
     assert set(s["flagged"]["by_type"]) == {"smiles_whitespace", "rdkit_warning"}
-    assert s["total_smiles_whitespace"] == {"train": 1, "test": 0}
-    assert s["total_rdkit_warnings"] == {"train": 0, "test": 1}
+    assert s["total_quality_flags"]["smiles_whitespace"] == {"train": 1, "test": 0}
+    assert s["total_quality_flags"]["rdkit_warnings"] == {"train": 0, "test": 1}
     text = format_report_as_text(report)
     assert "Conflicting single bond directions" in text

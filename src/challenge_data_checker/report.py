@@ -68,11 +68,22 @@ def quality_flag_entries(records: list[MoleculeRecord]) -> QualityFlags:
         after stripping whitespace, RDKit parse warnings) to the matching
         record locations.
     """
+    parsed = [r for r in records if r.is_parsed]
     return {
-        "mixtures": [r.location() for r in records if r.is_parsed and r.is_mixture],
-        "salts_or_metal_complexes": [
-            r.location() for r in records if r.is_parsed and r.is_salt_or_metal
+        "salt_or_solvate": [r.location() for r in parsed if r.is_salt_or_solvate],
+        "contains_metal": [r.location() for r in parsed if r.contains_metal],
+        "multi_component": [r.location() for r in parsed if r.is_multi_component],
+        "homodimer_without_counterion": [
+            r.location() for r in parsed if r.is_homodimer_without_counterion
         ],
+        "unclassified_mixture": [r.location() for r in parsed if r.is_unclassified_mixture],
+        "net_charge": [
+            {**r.location(), "charge": r.net_charge}
+            for r in parsed
+            if r.net_charge is not None and r.net_charge != 0
+        ],
+        "mixtures": [r.location() for r in parsed if r.is_mixture],
+        "salts_or_metal_complexes": [r.location() for r in parsed if r.is_salt_or_metal],
         "suspicious_fragments": [
             r.location() for r in records if r.is_parsed and r.is_suspicious_fragment
         ],
@@ -304,13 +315,12 @@ def build_report(
             "train": len(quality_train["suspicious_fragments"]),
             "test": len(quality_test["suspicious_fragments"]),
         },
-        "total_smiles_whitespace": {
-            "train": len(quality_train["smiles_whitespace"]),
-            "test": len(quality_test["smiles_whitespace"]),
-        },
-        "total_rdkit_warnings": {
-            "train": len(quality_train["rdkit_warnings"]),
-            "test": len(quality_test["rdkit_warnings"]),
+        "total_quality_flags": {
+            category: {
+                "train": len(quality_train[category]),
+                "test": len(quality_test[category]),
+            }
+            for category in QUALITY_FLAG_CATEGORIES
         },
     }
 
@@ -325,6 +335,7 @@ def build_report(
             "tautomer_standardisation": config.settings.tautomer_standardisation,
             "strip_salts": config.settings.strip_salts,
             "identifier_case_insensitive": config.settings.identifier_case_insensitive,
+            "multi_component_min_heavy_atoms": config.settings.multi_component_min_heavy_atoms,
             "max_train_test_similarity": config.settings.max_train_test_similarity,
             "fp_radius": config.settings.fp_radius,
             "fp_n_bits": config.settings.fp_n_bits,
@@ -533,11 +544,8 @@ def _build_summary_lines(report: Report) -> list[str]:
         lines.append("  (no identifier columns configured/available)")
     lines.append("")
     lines.append("Quality filter flags")
-    lines.append(f"  Mixtures/disconnected  : {_fmt_counts(s['total_mixtures'])}")
-    lines.append(f"  Salts/metal complexes  : {_fmt_counts(s['total_salts_or_metal_complexes'])}")
-    lines.append(f"  Suspicious fragments   : {_fmt_counts(s['total_suspicious_fragments'])}")
-    lines.append(f"  Whitespace in SMILES   : {_fmt_counts(s['total_smiles_whitespace'])}")
-    lines.append(f"  RDKit parse warnings   : {_fmt_counts(s['total_rdkit_warnings'])}")
+    for category, label in _QUALITY_FLAG_LABELS.items():
+        lines.append(f"  {label:<28}: {_fmt_counts(s['total_quality_flags'][category])}")
     lines.append("=" * 60)
     return lines
 
@@ -815,6 +823,22 @@ def _namespace_table(s: Summary, context: TierContext) -> Table | None:
     return table
 
 
+# Dashboard labels for the tiered quality-flag categories, in display order.
+# The deprecated totals ("mixtures", "salts_or_metal_complexes") stay in the
+# JSON report but aren't shown.
+_QUALITY_FLAG_LABELS: dict[str, str] = {
+    "salt_or_solvate": "Salts/solvates",
+    "contains_metal": "Contains metal",
+    "multi_component": "Multi-component",
+    "homodimer_without_counterion": "Homodimer, no counterion",
+    "unclassified_mixture": "Other mixtures",
+    "net_charge": "Net charge",
+    "suspicious_fragments": "Suspicious fragments",
+    "smiles_whitespace": "Whitespace in SMILES",
+    "rdkit_warnings": "RDKit parse warnings",
+}
+
+
 def _quality_table(s: Summary, context: TierContext) -> Table:
     """Build the quality-filter flags summary table.
 
@@ -832,14 +856,10 @@ def _quality_table(s: Summary, context: TierContext) -> Table:
         train and test counts side by side.
     """
     table = _new_table(["Filter", "Train", "Test"])
-    rows: list[tuple[str, PerPool[int], str]] = [
-        ("Mixtures/disconnected", s["total_mixtures"], "mixture"),
-        ("Salts/metal complexes", s["total_salts_or_metal_complexes"], "salt_or_metal_complex"),
-        ("Suspicious fragments", s["total_suspicious_fragments"], "suspicious_fragment"),
-        ("Whitespace in SMILES", s["total_smiles_whitespace"], "smiles_whitespace"),
-        ("RDKit parse warnings", s["total_rdkit_warnings"], "rdkit_warning"),
-    ]
-    for label, counts, finding_type in rows:
+    for category, label in _QUALITY_FLAG_LABELS.items():
+        counts = s["total_quality_flags"][category]
+        finding_type = QUALITY_FLAG_FINDING_TYPES[category]
+        assert finding_type is not None  # deprecated categories aren't labelled
         table.add_row(
             label,
             _status_cell(counts["train"], severity_of(finding_type, "train", context)),
@@ -1228,14 +1248,20 @@ def _quality_flag_lines(quality_flags: QualityFlags, pool: Literal["train", "tes
     lines = []
     for category in QUALITY_FLAG_CATEGORIES:
         locations = quality_flags[category]
-        if not locations:
-            continue
-        tag = _tag(QUALITY_FLAG_FINDING_TYPES[category], pool, TierContext())
+        finding_type = QUALITY_FLAG_FINDING_TYPES[category]
+        if not locations or finding_type is None:
+            continue  # nothing found, or a deprecated total repeating other categories
+        tag = _tag(finding_type, pool, TierContext())
         lines.append(f"  {tag} {category}:")
         if category == "rdkit_warnings":
             lines.extend(
                 f"    {_fmt_location(entry)} -- {entry['warning']}"
                 for entry in quality_flags["rdkit_warnings"]
+            )
+        elif category == "net_charge":
+            lines.extend(
+                f"    {_fmt_location(entry)} -- net charge {entry['charge']:+d}"
+                for entry in quality_flags["net_charge"]
             )
         else:
             lines.extend(_fmt_locations(locations, indent="    "))

@@ -72,6 +72,17 @@ class MoleculeRecord:
         Whether the molecule has multiple disconnected fragments.
     is_salt_or_metal : bool
         Whether the molecule is a salt, solvate or metal complex.
+    is_salt_or_solvate : bool
+        Whether the molecule is a parent compound plus only known
+        counterions, solvents and copies of itself.
+    is_multi_component : bool
+        Whether it holds two or more distinct unrecognised compounds.
+    is_homodimer_without_counterion : bool
+        Whether it is two or more copies of one compound and nothing else.
+    is_unclassified_mixture : bool
+        Whether it has several fragments that none of the above explains.
+    net_charge : int | None
+        Sum of formal charges as drawn, or ``None`` if unparsed.
     is_suspicious_fragment : bool
         Whether the molecule looks like a stripped degradation artefact
         (e.g. a bare counterion).
@@ -101,6 +112,11 @@ class MoleculeRecord:
     contains_metal: bool = False
     is_mixture: bool = False
     is_salt_or_metal: bool = False
+    is_salt_or_solvate: bool = False
+    is_multi_component: bool = False
+    is_homodimer_without_counterion: bool = False
+    is_unclassified_mixture: bool = False
+    net_charge: int | None = None
     is_suspicious_fragment: bool = False
 
     @property

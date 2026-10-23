@@ -42,18 +42,36 @@ EXACT_REPRESENTATIONS: tuple[Representation, ...] = tuple(
 
 # Per-pool quality-filter categories (see ``report.quality_flag_entries``).
 type QualityFlagCategory = Literal[
-    "mixtures",
-    "salts_or_metal_complexes",
+    "salt_or_solvate",
+    "contains_metal",
+    "multi_component",
+    "homodimer_without_counterion",
+    "unclassified_mixture",
+    "net_charge",
     "suspicious_fragments",
     "smiles_whitespace",
     "rdkit_warnings",
+    "mixtures",
+    "salts_or_metal_complexes",
 ]
 QUALITY_FLAG_CATEGORIES: tuple[QualityFlagCategory, ...] = (
-    "mixtures",
-    "salts_or_metal_complexes",
+    "salt_or_solvate",
+    "contains_metal",
+    "multi_component",
+    "homodimer_without_counterion",
+    "unclassified_mixture",
+    "net_charge",
     "suspicious_fragments",
     "smiles_whitespace",
     "rdkit_warnings",
+    "mixtures",
+    "salts_or_metal_complexes",
+)
+# Kept for backwards compatibility, as totals: every multi-fragment entry,
+# and every salt/solvate or metal-containing entry. Each such entry is also
+# under one of the specific categories above, which are the ones tiered.
+DEPRECATED_QUALITY_FLAG_CATEGORIES: frozenset[QualityFlagCategory] = frozenset(
+    {"mixtures", "salts_or_metal_complexes"}
 )
 
 
@@ -95,6 +113,12 @@ class RdkitWarningEntry(Location):
     """A row whose SMILES parsed, but with a warning from RDKit."""
 
     warning: str
+
+
+class NetChargeEntry(Location):
+    """A row whose formal charges don't sum to zero."""
+
+    charge: int
 
 
 class LeakageFinding(TypedDict):
@@ -221,6 +245,12 @@ class QualityFlags(TypedDict):
     mixtures: list[Location]
     salts_or_metal_complexes: list[Location]
     suspicious_fragments: list[Location]
+    salt_or_solvate: list[Location]
+    contains_metal: list[Location]
+    multi_component: list[Location]
+    homodimer_without_counterion: list[Location]
+    unclassified_mixture: list[Location]
+    net_charge: list[NetChargeEntry]
     smiles_whitespace: list[Location]
     rdkit_warnings: list[RdkitWarningEntry]
 
@@ -289,8 +319,7 @@ class Summary(TypedDict):
     total_mixtures: PerPool[int]
     total_salts_or_metal_complexes: PerPool[int]
     total_suspicious_fragments: PerPool[int]
-    total_smiles_whitespace: PerPool[int]
-    total_rdkit_warnings: PerPool[int]
+    total_quality_flags: dict[str, PerPool[int]]
 
 
 class ReportConfig(TypedDict):
@@ -304,6 +333,7 @@ class ReportConfig(TypedDict):
     tautomer_standardisation: bool
     strip_salts: bool
     identifier_case_insensitive: bool
+    multi_component_min_heavy_atoms: int
     max_train_test_similarity: float
     fp_radius: int
     fp_n_bits: int

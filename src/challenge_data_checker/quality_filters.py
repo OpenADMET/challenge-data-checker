@@ -184,7 +184,32 @@ def _fragment_keys(smiles_set: set[str]) -> set[str]:
 COUNTERION_KEYS = _fragment_keys(_COUNTERION_SMILES_RAW)
 SOLVENT_KEYS = _fragment_keys(_SOLVENT_SMILES_RAW)
 
-type FragmentKind = Literal["counterion", "solvent", "unknown"]
+type FragmentKind = Literal["counterion", "solvent", "parent_copy", "unknown"]
+
+# Default minimum heavy-atom count for an unrecognised fragment to count as a
+# separate component in the multi_component check.
+DEFAULT_MULTI_COMPONENT_MIN_HEAVY_ATOMS = 6
+
+
+@dataclass(frozen=True)
+class Fragment:
+    """One connected fragment of a molecule.
+
+    Attributes
+    ----------
+    smiles : str
+        The fragment's canonical SMILES (as drawn, not neutralised).
+    kind : FragmentKind
+        ``"counterion"`` or ``"solvent"`` if recognised, ``"parent_copy"``
+        for a further copy of the parent (e.g. in a 2:1 salt), otherwise
+        ``"unknown"``.
+    heavy_atoms : int
+        The fragment's heavy-atom count.
+    """
+
+    smiles: str
+    kind: FragmentKind
+    heavy_atoms: int
 
 
 @dataclass(frozen=True)
@@ -197,32 +222,111 @@ class FragmentClassification:
         The neutralised parent fragment: the largest fragment that isn't
         a known counterion or solvent, or the largest fragment overall if
         every fragment is known.
+    parent_fragment : Fragment
+        The parent as drawn (before neutralisation).
     parent_is_known : bool
         Whether the parent is itself a known counterion or solvent, i.e.
         the molecule has no other fragment to be the "real" compound.
-    stripped : tuple[tuple[str, FragmentKind], ...]
-        Canonical SMILES and kind of every non-parent fragment.
+    others : tuple[Fragment, ...]
+        Every non-parent fragment.
     """
 
     parent: Chem.Mol
+    parent_fragment: Fragment
     parent_is_known: bool
-    stripped: tuple[tuple[str, FragmentKind], ...]
+    others: tuple[Fragment, ...]
+
+    @property
+    def stripped(self) -> tuple[tuple[str, FragmentKind], ...]:
+        """Canonical SMILES and kind of every non-parent fragment.
+
+        Returns
+        -------
+        tuple[tuple[str, FragmentKind], ...]
+            One ``(smiles, kind)`` pair per non-parent fragment.
+        """
+        return tuple((f.smiles, f.kind) for f in self.others)
 
     @property
     def is_salt_or_solvate(self) -> bool:
         """Whether the molecule is a parent compound plus only known counterions/solvents.
 
+        Further copies of the parent are allowed (a 2:1 salt), but at least
+        one fragment must be a known counterion or solvent.
+
         Returns
         -------
         bool
-            ``True`` if at least one fragment was stripped, the parent
-            isn't itself a known counterion/solvent, and every stripped
-            fragment is a known counterion or solvent.
+            ``True`` if the parent isn't itself a known counterion/solvent,
+            every other fragment is a counterion, solvent or parent copy,
+            and at least one is a counterion or solvent.
+        """
+        kinds = {f.kind for f in self.others}
+        return (
+            not self.parent_is_known
+            and kinds <= {"counterion", "solvent", "parent_copy"}
+            and bool(kinds & {"counterion", "solvent"})
+        )
+
+    @property
+    def is_homodimer_without_counterion(self) -> bool:
+        """Whether the molecule is two or more copies of one compound and nothing else.
+
+        Typically a 2:1 salt whose counterion was stripped, leaving the
+        parent doubled: the molecular weight and stoichiometry are wrong.
+
+        Returns
+        -------
+        bool
+            ``True`` if there are other fragments and all are copies of
+            an unrecognised parent.
+        """
+        return bool(self.others) and all(f.kind == "parent_copy" for f in self.others)
+
+    def is_multi_component(self, min_heavy_atoms: int) -> bool:
+        """Whether the molecule holds two or more distinct unrecognised compounds.
+
+        For example two unrelated drugs concatenated into one SMILES.
+
+        Parameters
+        ----------
+        min_heavy_atoms : int
+            Minimum heavy atoms for an unrecognised fragment to count as a
+            compound in its own right.
+
+        Returns
+        -------
+        bool
+            ``True`` if at least two distinct unrecognised fragments
+            (counting the parent) each have ``min_heavy_atoms`` or more.
+        """
+        candidates = [self.parent_fragment, *self.others]
+        large = {
+            f.smiles for f in candidates if f.kind == "unknown" and f.heavy_atoms >= min_heavy_atoms
+        }
+        return len(large) >= 2
+
+    def is_unclassified_mixture(self, min_heavy_atoms: int) -> bool:
+        """Whether the molecule has several fragments that no other flag explains.
+
+        Parameters
+        ----------
+        min_heavy_atoms : int
+            The ``multi_component`` threshold (see ``is_multi_component``).
+
+        Returns
+        -------
+        bool
+            ``True`` for a multi-fragment molecule that isn't a salt or
+            solvate, a homodimer, or multi-component, e.g. a compound with
+            a small unrecognised fragment, or only counterion-like
+            fragments.
         """
         return (
-            bool(self.stripped)
-            and not self.parent_is_known
-            and all(kind != "unknown" for _, kind in self.stripped)
+            bool(self.others)
+            and not self.is_salt_or_solvate
+            and not self.is_homodimer_without_counterion
+            and not self.is_multi_component(min_heavy_atoms)
         )
 
 
@@ -258,6 +362,8 @@ def classify_fragments(mol: Chem.Mol) -> FragmentClassification:
     Choosing among unknown fragments first means a large counterion such as
     pamoate is never picked over a smaller drug. The parent is neutralised,
     so a protonated amine hydrochloride and its free base share a parent.
+    Other fragments identical to an unrecognised parent are marked as
+    parent copies.
 
     Parameters
     ----------
@@ -267,9 +373,10 @@ def classify_fragments(mol: Chem.Mol) -> FragmentClassification:
     Returns
     -------
     FragmentClassification
-        The parent and the classified stripped fragments.
+        The parent and the classified other fragments.
     """
     frags = Chem.GetMolFrags(mol, asMols=True)
+    smiles = [Chem.MolToSmiles(f) for f in frags]
     kinds = [fragment_kind(f) for f in frags]
     unknown = [i for i, kind in enumerate(kinds) if kind == "unknown"]
     candidates = unknown or list(range(len(frags)))
@@ -278,17 +385,22 @@ def classify_fragments(mol: Chem.Mol) -> FragmentClassification:
         key=lambda i: (
             frags[i].GetNumHeavyAtoms(),
             rdMolDescriptors.CalcExactMolWt(frags[i]),
-            Chem.MolToSmiles(frags[i]),
+            smiles[i],
         ),
     )
+    parent_is_known = kinds[parent_idx] != "unknown"
+
+    def fragment(i: int) -> Fragment:
+        kind = kinds[i]
+        if i != parent_idx and not parent_is_known and smiles[i] == smiles[parent_idx]:
+            kind = "parent_copy"
+        return Fragment(smiles[i], kind, frags[i].GetNumHeavyAtoms())
+
     return FragmentClassification(
         parent=_UNCHARGER.uncharge(frags[parent_idx]),
-        parent_is_known=kinds[parent_idx] != "unknown",
-        stripped=tuple(
-            (Chem.MolToSmiles(frag), kind)
-            for i, (frag, kind) in enumerate(zip(frags, kinds, strict=True))
-            if i != parent_idx
-        ),
+        parent_fragment=fragment(parent_idx),
+        parent_is_known=parent_is_known,
+        others=tuple(fragment(i) for i in range(len(frags)) if i != parent_idx),
     )
 
 

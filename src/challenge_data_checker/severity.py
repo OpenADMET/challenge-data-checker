@@ -96,18 +96,32 @@ TIERS: dict[str, TierRule] = {
     "identifier_near_duplicate": Severity.WARN,
     "id_with_unparseable_and_valid_structures": Severity.WARN,
     "missing_structure_resolvable_by_id": Severity.WARN,
+    # Broken structures (rule 1): a 2:1 salt with its counterion stripped, or
+    # a charged entry with its counterion stripped.
+    "homodimer_without_counterion": Severity.FAIL,
+    "net_charge": Severity.FAIL,
     # Heuristic quality flags (rule 4)
-    "mixture": Severity.WARN,
-    "salt_or_metal_complex": Severity.WARN,
+    "salt_or_solvate": Severity.WARN,
+    "contains_metal": Severity.WARN,
+    "multi_component": Severity.WARN,
+    "unclassified_mixture": Severity.WARN,
     "suspicious_fragment": Severity.WARN,
     "smiles_whitespace": Severity.WARN,
     "rdkit_warning": Severity.WARN,
 }
 
-# Finding type for each per-pool quality-flag category in the report.
-QUALITY_FLAG_FINDING_TYPES: dict[str, str] = {
-    "mixtures": "mixture",
-    "salts_or_metal_complexes": "salt_or_metal_complex",
+# Finding type for each per-pool quality-flag category in the report. The
+# deprecated total categories have none: their entries are tiered through
+# the specific categories instead.
+QUALITY_FLAG_FINDING_TYPES: dict[str, str | None] = {
+    "salt_or_solvate": "salt_or_solvate",
+    "contains_metal": "contains_metal",
+    "multi_component": "multi_component",
+    "homodimer_without_counterion": "homodimer_without_counterion",
+    "unclassified_mixture": "unclassified_mixture",
+    "net_charge": "net_charge",
+    "mixtures": None,
+    "salts_or_metal_complexes": None,
     "suspicious_fragments": "suspicious_fragment",
     "smiles_whitespace": "smiles_whitespace",
     "rdkit_warnings": "rdkit_warning",
@@ -300,8 +314,11 @@ def collect_findings(
 
         flags = quality_flags[pool]
         for category in QUALITY_FLAG_CATEGORIES:
+            quality_type = QUALITY_FLAG_FINDING_TYPES[category]
+            if quality_type is None:
+                continue
             for location in flags[category]:
-                yield Finding(QUALITY_FLAG_FINDING_TYPES[category], pool, _rows([location]))
+                yield Finding(quality_type, pool, _rows([location]))
 
     for issues in namespace_issues.values():
         for conflict in issues["one_id_multiple_structures"]:

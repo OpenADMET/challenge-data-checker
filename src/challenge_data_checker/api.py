@@ -19,6 +19,7 @@ from challenge_data_checker.config import (
 )
 from challenge_data_checker.core import run_audit
 from challenge_data_checker.io_utils import DataSource
+from challenge_data_checker.quality_filters import DEFAULT_MULTI_COMPONENT_MIN_HEAVY_ATOMS
 from challenge_data_checker.report_types import Report
 
 # A single train/test argument: one source, or a list of sources (paths and/or
@@ -52,6 +53,7 @@ def audit(
     tautomer_standardisation: bool = False,
     strip_salts: bool = True,
     identifier_case_insensitive: bool = False,
+    multi_component_min_heavy_atoms: int = DEFAULT_MULTI_COMPONENT_MIN_HEAVY_ATOMS,
     max_train_test_similarity: float = 1.0,
     fp_radius: int = 2,
     fp_n_bits: int = 2048,
@@ -88,6 +90,9 @@ def audit(
     identifier_case_insensitive : bool
         Whether identifier values that differ only in letter case count as
         the same identifier.
+    multi_component_min_heavy_atoms : int
+        Minimum heavy atoms for an unrecognised fragment to count as a
+        separate compound in the ``multi_component`` quality flag.
     max_train_test_similarity : float
         Tanimoto similarity threshold (0.0-1.0, inclusive) at or above
         which a train/test pair is flagged as possible leakage.
@@ -128,6 +133,7 @@ def audit(
             tautomer_standardisation=tautomer_standardisation,
             strip_salts=strip_salts,
             identifier_case_insensitive=identifier_case_insensitive,
+            multi_component_min_heavy_atoms=multi_component_min_heavy_atoms,
             max_train_test_similarity=max_train_test_similarity,
             fp_radius=fp_radius,
             fp_n_bits=fp_n_bits,

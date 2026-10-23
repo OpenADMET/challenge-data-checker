@@ -398,6 +398,7 @@ class MoleculeProcessor:
             record.parse_error_category = parsed.error_category
             return record
         mol = parsed.mol
+        record.net_charge = Chem.GetFormalCharge(mol)
         record.rdkit_warning = parsed.warning
         record.smiles_whitespace_recovered = parsed.whitespace_recovered
 
@@ -414,7 +415,12 @@ class MoleculeProcessor:
 
             fragments = classify_fragments(mol)
             record.stripped_fragments = list(fragments.stripped)
+            record.is_salt_or_solvate = fragments.is_salt_or_solvate
             record.is_salt_or_metal = record.contains_metal or fragments.is_salt_or_solvate
+            min_heavy_atoms = self.settings.multi_component_min_heavy_atoms
+            record.is_multi_component = fragments.is_multi_component(min_heavy_atoms)
+            record.is_homodimer_without_counterion = fragments.is_homodimer_without_counterion
+            record.is_unclassified_mixture = fragments.is_unclassified_mixture(min_heavy_atoms)
             parent = fragments.parent
             if Chem.MolToSmiles(parent) == record.canonical_smiles:
                 # Already a single neutral fragment: reuse the work done above.

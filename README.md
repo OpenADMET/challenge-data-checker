@@ -48,17 +48,29 @@ issues. Built for sequential processing of datasets up to ~10,000 molecules.
   structure in some rows and a broken SMILES in others is flagged, and an
   empty SMILES whose identifier has exactly one structure elsewhere is
   reported as resolvable (with the candidate structure).
-- **Quality filters**: mixtures/disconnected fragments, salts, solvates and
-  metal complexes, and suspicious tiny fragments that look like stripped
-  degradation artefacts (e.g. a bare cyanide left over from a failed
-  preprocessing pipeline). Common small molecules such as methanol,
-  ethanol, acetonitrile and dichloromethane are allowlisted and not
-  flagged. A salt or solvate is a parent compound whose other fragments
-  are all known counterions or solvents, drawn either ionic or neutral
-  (e.g. `.[Cl-]` or `.Cl`, TFA, mesylate, maleate, citrate, hydrates and
-  common crystallisation solvents). The parent is the largest fragment
-  that isn't a known counterion or solvent, neutralised, so a large
-  counterion such as pamoate is never mistaken for the compound.
+- **Quality filters**: multi-fragment entries are split by what they are:
+  - **salt or solvate:** a parent compound plus known counterions or
+    solvents, drawn either ionic or neutral (e.g. `.[Cl-]` or `.Cl`, TFA,
+    mesylate, maleate, citrate, hydrates, common crystallisation solvents),
+    and possibly further copies of the parent, as in a 2:1 salt
+  - **multi-component:** two or more distinct unrecognised compounds of at
+    least `multi_component_min_heavy_atoms` heavy atoms, e.g. two drugs
+    concatenated by a spreadsheet error
+  - **homodimer without counterion:** `X.X`, a 2:1 salt with its acid
+    stripped
+  - **other mixtures:** anything else with several fragments
+
+  The parent is the largest fragment that isn't a known counterion or
+  solvent, neutralised, so a large counterion such as pamoate is never
+  mistaken for the compound. Separately flagged:
+  - entries whose formal charges don't sum to zero, such as a carboxylate
+    whose cation was stripped (zwitterions and nitro groups are neutral and
+    aren't flagged)
+  - entries containing a metal
+  - suspicious tiny fragments that look like stripped degradation
+    artefacts (e.g. a bare cyanide left over from a failed preprocessing
+    pipeline); common small molecules such as methanol, ethanol,
+    acetonitrile and dichloromethane are allowlisted and not flagged
 - Prints a scannable summary dashboard to stdout and writes a detailed report
   (JSON or plain text) with exact row indices, file paths, and pairwise
   similarity scores for every flagged issue.
@@ -126,6 +138,7 @@ identifier_columns = ["compound_id", "external_reg_no"]
 tautomer_standardisation = false     # default false
 strip_salts = true                   # default true (also compare salt-stripped parents)
 identifier_case_insensitive = false  # default false (case-only id differences only WARN)
+multi_component_min_heavy_atoms = 6  # default 6 (size of a fragment counted as a compound)
 max_train_test_similarity = 1.0      # default 1.0 (Tanimoto threshold, inclusive)
 fp_radius = 2                        # default 2 (Morgan fingerprint radius)
 fp_n_bits = 2048                     # default 2048 (Morgan fingerprint bit length)
@@ -222,7 +235,8 @@ report = audit(
 `report` is the same dict written to `report_output` by the CLI. All
 `[settings]` keys are available as keyword arguments (`smiles_column`,
 `identifier_columns`, `tautomer_standardisation`, `strip_salts`,
-`identifier_case_insensitive`, `max_train_test_similarity`,
+`identifier_case_insensitive`, `multi_component_min_heavy_atoms`,
+`max_train_test_similarity`,
 `fp_radius`, `fp_n_bits`). `report_output`/`report_format` work the same way
 as in the config file, except both are optional: omit `report_output` to skip
 writing a file entirely and only get the dict back. Pass `print_report=False`
@@ -263,7 +277,8 @@ otherwise. Four rules decide the tier:
 | One structure → several identifiers | | | WARN |
 | Identifier with surrounding whitespace; near-duplicate identifiers (case or `-`/`_` only) | | | WARN |
 | Identifier with valid and unparseable SMILES; empty SMILES resolvable via its identifier | | | WARN (the unparseable rows themselves still FAIL) |
-| Mixtures, salts/metal complexes, suspicious fragments | WARN | WARN | |
+| Homodimer without counterion; net formal charge ≠ 0 | FAIL | FAIL | |
+| Salt or solvate, contains metal, multi-component, other mixtures, suspicious fragments | WARN | WARN | |
 | SMILES that only parses after stripping whitespace; RDKit parse warnings | WARN | WARN | |
 
 Counts are of distinct problems and rows, not of checks that fired: a

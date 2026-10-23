@@ -88,6 +88,26 @@ All notable changes to this project are recorded here. The format follows
   - The Tanimoto check is WARN at the default threshold of `1.0`, where it
     only catches fingerprint collisions, and FAIL when you lower the
     threshold.
+- **Breaking: the mixture and salt quality flags are split (#26).**
+  Multi-fragment entries are now classified as one of:
+  - `salt_or_solvate` (WARN): a parent compound plus known counterions,
+    solvents or further copies of itself (a 2:1 salt)
+  - `multi_component` (WARN): two or more distinct unrecognised compounds,
+    each with at least `multi_component_min_heavy_atoms` heavy atoms (new
+    setting, default 6)
+  - `homodimer_without_counterion` (**FAIL**): `X.X` with nothing else, a
+    2:1 salt with its acid stripped
+  - `unclassified_mixture` (WARN): anything else
+
+  Also new: `net_charge` (**FAIL**, entries whose formal charges don't sum
+  to zero, e.g. a dicarboxylate with its cation stripped; zwitterions are
+  neutral and unaffected) and `contains_metal` (WARN, split out of the old
+  salts/metals bucket). The old `mixtures` and `salts_or_metal_complexes`
+  buckets keep their totals in the JSON report for backwards
+  compatibility. They are deprecated and no longer count towards the
+  status, since their entries are tiered through the new categories. The
+  summary gains `total_quality_flags` with per-pool counts for every
+  category.
 - **Breaking (dependency floors):** dependencies now declare tested lower
   bounds: `pandas>=2.2`, `numpy>=1.26`, `rdkit>=2024.3`, `rich>=13`, and in
   the extras `pyarrow>=14`, `huggingface_hub>=0.24`, `requests>=2.31`,
