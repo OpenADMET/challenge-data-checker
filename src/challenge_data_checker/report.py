@@ -38,6 +38,7 @@ from challenge_data_checker.report_types import (
     Report,
     Summary,
     TanimotoFinding,
+    UnparseableEntry,
 )
 from challenge_data_checker.severity import (
     QUALITY_FLAG_FINDING_TYPES,
@@ -148,6 +149,37 @@ def _leaked_counts(
     return len(exact), len(salt_form - exact), len(stereo - exact - salt_form)
 
 
+def _mark_resolvable_rows(
+    unparseable: list[UnparseableEntry], namespace_issues: dict[str, NamespaceIssues]
+) -> None:
+    """Record, on each empty-SMILES row, an identifier column that can fill it in.
+
+    A row is resolvable through a column when its identifier there has
+    exactly one parsed structure elsewhere. The first such column wins.
+
+    Parameters
+    ----------
+    unparseable : list[UnparseableEntry]
+        The unparseable rows, updated in place.
+    namespace_issues : dict[str, NamespaceIssues]
+        The result of ``checks.identifier_namespace_issues``.
+
+    Returns
+    -------
+    None
+    """
+    resolvable: dict[tuple[str, str, int], str] = {}
+    for col, issues in namespace_issues.items():
+        for finding in issues["missing_structure_resolvable_by_id"]:
+            if finding["ambiguous"]:
+                continue
+            for loc in finding["missing"]:
+                resolvable.setdefault((loc["pool"], loc["source_file"], loc["row_index"]), col)
+    for entry in unparseable:
+        key = (entry["pool"], entry["source_file"], entry["row_index"])
+        entry["resolvable_via_identifier"] = resolvable.get(key)
+
+
 def build_report(
     config: Config,
     train_records: list[MoleculeRecord],
@@ -194,6 +226,7 @@ def build_report(
     train_dupes = internal_duplicates(train_records, identifier_columns, strip_salts)
     test_dupes = internal_duplicates(test_records, identifier_columns, strip_salts)
     namespace_issues = identifier_namespace_issues(all_records, identifier_columns)
+    _mark_resolvable_rows(unparseable, namespace_issues)
     quality_train = quality_flag_entries(train_records)
     quality_test = quality_flag_entries(test_records)
 
@@ -220,6 +253,9 @@ def build_report(
         "total_unparseable": len(unparseable),
         "total_unparseable_train": sum(1 for r in train_records if not r.is_parsed),
         "total_unparseable_test": sum(1 for r in test_records if not r.is_parsed),
+        "total_unparseable_resolvable_via_identifier": sum(
+            1 for entry in unparseable if entry["resolvable_via_identifier"] is not None
+        ),
         "total_unparseable_by_category": dict(
             sorted(Counter(entry["category"] for entry in unparseable).items())
         ),
@@ -247,6 +283,12 @@ def build_report(
                 "one_structure_multiple_ids": len(issues["one_structure_multiple_ids"]),
                 "identifier_whitespace": len(issues["identifier_whitespace"]),
                 "near_duplicates": len(issues["near_duplicates"]),
+                "id_with_unparseable_and_valid_structures": len(
+                    issues["id_with_unparseable_and_valid_structures"]
+                ),
+                "missing_structure_resolvable_by_id": len(
+                    issues["missing_structure_resolvable_by_id"]
+                ),
             }
             for col, issues in namespace_issues.items()
         },
@@ -426,6 +468,14 @@ def _build_summary_lines(report: Report) -> list[str]:
         *(
             [f"  by category        : {_fmt_counts(s['total_unparseable_by_category'])}"]
             if s["total_unparseable_by_category"]
+            else []
+        ),
+        *(
+            [
+                f"  resolvable via id  : {s['total_unparseable_resolvable_via_identifier']} "
+                "(empty SMILES whose identifier has one structure elsewhere)"
+            ]
+            if s["total_unparseable_resolvable_via_identifier"]
             else []
         ),
         "",
@@ -706,6 +756,35 @@ def _duplicates_table(s: Summary, context: TierContext) -> Table:
     return table
 
 
+type _NamespaceCountKey = Literal[
+    "one_id_multiple_structures",
+    "one_structure_multiple_ids",
+    "id_with_unparseable_and_valid_structures",
+    "missing_structure_resolvable_by_id",
+    "near_duplicates",
+    "identifier_whitespace",
+]
+
+# Rows of the dashboard's identifier table: label, NamespaceIssueCounts key,
+# and finding type (for its tier).
+_NAMESPACE_TABLE_ROWS: tuple[tuple[str, _NamespaceCountKey, str], ...] = (
+    ("1 id -> many structures", "one_id_multiple_structures", "one_id_multiple_structures"),
+    ("1 structure -> many ids", "one_structure_multiple_ids", "one_structure_multiple_ids"),
+    (
+        "id with broken + valid SMILES",
+        "id_with_unparseable_and_valid_structures",
+        "id_with_unparseable_and_valid_structures",
+    ),
+    (
+        "empty SMILES resolvable via id",
+        "missing_structure_resolvable_by_id",
+        "missing_structure_resolvable_by_id",
+    ),
+    ("Near-duplicate ids", "near_duplicates", "identifier_near_duplicate"),
+    ("Whitespace in ids", "identifier_whitespace", "identifier_whitespace"),
+)
+
+
 def _namespace_table(s: Summary, context: TierContext) -> Table | None:
     """Build the identifier namespace consistency summary table.
 
@@ -719,38 +798,19 @@ def _namespace_table(s: Summary, context: TierContext) -> Table | None:
     Returns
     -------
     Table | None
-        A rich table with one row per identifier column, or ``None`` if
-        no identifier columns were configured/available.
+        A rich table with one row per check and one column per identifier
+        column, or ``None`` if no identifier columns were configured or
+        available.
     """
-    if not s["total_identifier_namespace_issues"]:
+    columns = s["total_identifier_namespace_issues"]
+    if not columns:
         return None
-    table = _new_table(
-        [
-            "Identifier column",
-            "1 id -> many structures",
-            "1 structure -> many ids",
-            "Near-duplicate ids",
-            "Whitespace in ids",
-        ]
-    )
-    for col, counts in s["total_identifier_namespace_issues"].items():
+    table = _new_table(["Check", *columns])
+    for label, count_key, finding_type in _NAMESPACE_TABLE_ROWS:
+        severity = severity_of(finding_type, None, context)
         table.add_row(
-            col,
-            _status_cell(
-                counts["one_id_multiple_structures"],
-                severity_of("one_id_multiple_structures", None, context),
-            ),
-            _status_cell(
-                counts["one_structure_multiple_ids"],
-                severity_of("one_structure_multiple_ids", None, context),
-            ),
-            _status_cell(
-                counts["near_duplicates"], severity_of("identifier_near_duplicate", None, context)
-            ),
-            _status_cell(
-                counts["identifier_whitespace"],
-                severity_of("identifier_whitespace", None, context),
-            ),
+            label,
+            *(_status_cell(counts[count_key], severity) for counts in columns.values()),
         )
     return table
 
@@ -853,6 +913,11 @@ def print_summary(report: Report, report_output: str | Path | None) -> None:
         + (
             f" - {_fmt_counts(s['total_unparseable_by_category'])}"
             if s["total_unparseable_by_category"]
+            else ""
+        )
+        + (
+            f"; {s['total_unparseable_resolvable_via_identifier']} resolvable via identifier"
+            if s["total_unparseable_resolvable_via_identifier"]
             else ""
         ),
         "  Legend             : [bold red]✗ blocking (FAIL)[/]  "
@@ -1081,6 +1146,8 @@ def _identifier_namespace_lines(namespace_issues: dict[str, NamespaceIssues]) ->
     one_structure_tag = _tag("one_structure_multiple_ids", None, TierContext())
     near_tag = _tag("identifier_near_duplicate", None, TierContext())
     whitespace_tag = _tag("identifier_whitespace", None, TierContext())
+    broken_tag = _tag("id_with_unparseable_and_valid_structures", None, TierContext())
+    missing_tag = _tag("missing_structure_resolvable_by_id", None, TierContext())
     for column, issues in namespace_issues.items():
         for finding in issues["one_id_multiple_structures"]:
             lines.append(
@@ -1111,6 +1178,30 @@ def _identifier_namespace_lines(namespace_issues: dict[str, NamespaceIssues]) ->
             for identifier in group["identifiers"]:
                 lines.append(f"    identifier={identifier['identifier']!r}")
                 lines.extend(_fmt_locations(identifier["occurrences"], indent="        "))
+        for broken in issues["id_with_unparseable_and_valid_structures"]:
+            lines.append(
+                f"  {broken_tag} {column}: identifier {broken['identifier']!r} has valid "
+                "and unparseable SMILES"
+            )
+            for structure in broken["structures"]:
+                lines.append(f"    valid: canonical_smiles={structure['canonical_smiles']!r}")
+                lines.extend(_fmt_locations(structure["occurrences"], indent="        "))
+            for row in broken["unparseable"]:
+                lines.append(
+                    f"    unparseable ({row['category']}): {_fmt_location(row)} -- {row['error']}"
+                )
+        for missing in issues["missing_structure_resolvable_by_id"]:
+            verdict = (
+                "ambiguous: several candidate structures" if missing["ambiguous"] else "resolvable"
+            )
+            lines.append(
+                f"  {missing_tag} {column}: identifier {missing['identifier']!r} has empty "
+                f"SMILES ({verdict})"
+            )
+            lines.extend(_fmt_locations(missing["missing"], indent="    empty: "))
+            for structure in missing["candidates"]:
+                lines.append(f"    candidate: canonical_smiles={structure['canonical_smiles']!r}")
+                lines.extend(_fmt_locations(structure["occurrences"], indent="        "))
         for entry in issues["identifier_whitespace"]:
             lines.append(
                 f"  {whitespace_tag} {column}: {entry['raw_value']!r} has surrounding "
@@ -1200,6 +1291,11 @@ def format_report_as_text(report: Report) -> str:
             [
                 f"  {unparseable_tag} {_fmt_location(entry)} -- "
                 f"{entry['category']}: {entry['error']}"
+                + (
+                    f" (resolvable via identifier column {entry['resolvable_via_identifier']!r})"
+                    if entry["resolvable_via_identifier"]
+                    else ""
+                )
                 for entry in report["unparseable_smiles"]
             ],
         )

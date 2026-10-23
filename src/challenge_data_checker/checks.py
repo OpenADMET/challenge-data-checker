@@ -4,6 +4,7 @@ import logging
 import re
 from collections import defaultdict
 from collections.abc import Callable
+from typing import TypedDict
 
 from rdkit import DataStructs
 
@@ -13,8 +14,10 @@ from challenge_data_checker.report_types import (
     DuplicateFinding,
     IdentifierOccurrences,
     IdentifierWhitespaceEntry,
+    IdWithUnparseableAndValidStructures,
     InternalDuplicates,
     LeakageFinding,
+    MissingStructureResolvableById,
     NamespaceIssues,
     NearDuplicateIdentifiers,
     OneIdMultipleStructures,
@@ -48,7 +51,12 @@ def unparseable_entries(records: list[MoleculeRecord]) -> list[UnparseableEntry]
         A list of location/error dicts, one per unparseable record.
     """
     return [
-        {**r.location(), "error": r.parse_error, "category": r.parse_error_category or "other"}
+        {
+            **r.location(),
+            "error": r.parse_error,
+            "category": r.parse_error_category or "other",
+            "resolvable_via_identifier": None,
+        }
         for r in records
         if r.parse_error is not None
     ]
@@ -347,9 +355,14 @@ def identifier_namespace_issues(
           whitespace (stripped before every comparison).
         - ``near_duplicates``: distinct values that only differ in case or
           ``-``/``_``.
+        - ``id_with_unparseable_and_valid_structures``: an identifier with a
+          parsed structure in some rows and a broken (non-empty) SMILES in
+          others.
+        - ``missing_structure_resolvable_by_id``: an identifier with an empty
+          SMILES in some rows and a parsed structure in others, listing the
+          candidate structures (ambiguous if more than one).
 
-    The first two only consider rows whose SMILES parsed; the last two
-    consider every row.
+    The first two only consider rows whose SMILES parsed.
 
     Parameters
     ----------
@@ -374,25 +387,11 @@ def identifier_namespace_issues(
             by_id[id_value].append(r)
             by_structure[(r.canonical_smiles, r.inchikey)].append(r)
 
-        one_id_multiple_structures: list[OneIdMultipleStructures] = []
-        for id_value, recs in sorted(by_id.items()):
-            structures = {(r.canonical_smiles, r.inchikey) for r in recs}
-            if len(structures) > 1:
-                structure_entries: list[StructureOccurrences] = [
-                    {
-                        "canonical_smiles": cs,
-                        "inchikey": ik,
-                        "occurrences": [
-                            r.location()
-                            for r in recs
-                            if (r.canonical_smiles, r.inchikey) == (cs, ik)
-                        ],
-                    }
-                    for cs, ik in sorted(structures, key=lambda t: (t[0] or "", t[1] or ""))
-                ]
-                one_id_multiple_structures.append(
-                    {"identifier": id_value, "structures": structure_entries}
-                )
+        one_id_multiple_structures: list[OneIdMultipleStructures] = [
+            {"identifier": id_value, "structures": _structures(recs)}
+            for id_value, recs in sorted(by_id.items())
+            if len({(r.canonical_smiles, r.inchikey) for r in recs}) > 1
+        ]
 
         one_structure_multiple_ids: list[OneStructureMultipleIds] = []
         for (cs, ik), recs in sorted(
@@ -418,8 +417,108 @@ def identifier_namespace_issues(
             "one_structure_multiple_ids": one_structure_multiple_ids,
             "identifier_whitespace": _identifier_whitespace(all_records, col),
             "near_duplicates": _near_duplicate_identifiers(all_records, col),
+            **_unparsed_rows_by_identifier(all_records, col, by_id),
         }
     return result
+
+
+def _structures(records: list[MoleculeRecord]) -> list[StructureOccurrences]:
+    """Group parsed records by structure.
+
+    Parameters
+    ----------
+    records : list[MoleculeRecord]
+        Parsed records.
+
+    Returns
+    -------
+    list[StructureOccurrences]
+        One entry per distinct (canonical SMILES, InChIKey), sorted, with
+        the rows where it appears.
+    """
+    structures = {(r.canonical_smiles, r.inchikey) for r in records}
+    return [
+        {
+            "canonical_smiles": cs,
+            "inchikey": ik,
+            "occurrences": [
+                r.location() for r in records if (r.canonical_smiles, r.inchikey) == (cs, ik)
+            ],
+        }
+        for cs, ik in sorted(structures, key=lambda t: (t[0] or "", t[1] or ""))
+    ]
+
+
+class _UnparsedRowFindings(TypedDict):
+    """The identifier findings about rows whose SMILES didn't parse."""
+
+    id_with_unparseable_and_valid_structures: list[IdWithUnparseableAndValidStructures]
+    missing_structure_resolvable_by_id: list[MissingStructureResolvableById]
+
+
+def _unparsed_rows_by_identifier(
+    all_records: list[MoleculeRecord], col: str, parsed_by_id: dict[str, list[MoleculeRecord]]
+) -> _UnparsedRowFindings:
+    """Relate rows whose SMILES didn't parse to parsed rows with the same identifier.
+
+    An identifier with a broken SMILES in some rows and a parsed structure
+    in others shows which structure was probably intended. An identifier
+    with an empty SMILES in some rows and a parsed structure in others
+    means the empty rows can be filled in.
+
+    Parameters
+    ----------
+    all_records : list[MoleculeRecord]
+        Records from both pools.
+    col : str
+        The identifier column to check.
+    parsed_by_id : dict[str, list[MoleculeRecord]]
+        Parsed records grouped by their (normalised) value for ``col``.
+
+    Returns
+    -------
+    _UnparsedRowFindings
+        The ``id_with_unparseable_and_valid_structures`` and
+        ``missing_structure_resolvable_by_id`` findings for ``col``.
+    """
+    broken: dict[str, list[MoleculeRecord]] = defaultdict(list)
+    empty: dict[str, list[MoleculeRecord]] = defaultdict(list)
+    for r in all_records:
+        id_value = r.identifiers.get(col)
+        if id_value is None or r.is_parsed or id_value not in parsed_by_id:
+            continue
+        (empty if r.parse_error_category == "empty" else broken)[id_value].append(r)
+
+    with_broken: list[IdWithUnparseableAndValidStructures] = [
+        {
+            "identifier": id_value,
+            "structures": _structures(parsed_by_id[id_value]),
+            "unparseable": [
+                {
+                    **r.location(),
+                    "error": r.parse_error or "",
+                    "category": r.parse_error_category or "other",
+                }
+                for r in recs
+            ],
+        }
+        for id_value, recs in sorted(broken.items())
+    ]
+    resolvable: list[MissingStructureResolvableById] = []
+    for id_value, recs in sorted(empty.items()):
+        candidates = _structures(parsed_by_id[id_value])
+        resolvable.append(
+            {
+                "identifier": id_value,
+                "missing": [r.location() for r in recs],
+                "candidates": candidates,
+                "ambiguous": len(candidates) > 1,
+            }
+        )
+    return {
+        "id_with_unparseable_and_valid_structures": with_broken,
+        "missing_structure_resolvable_by_id": resolvable,
+    }
 
 
 _NEAR_DUPLICATE_STRIP_RE = re.compile(r"[-_]")

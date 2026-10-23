@@ -130,6 +130,20 @@ All notable changes to this project are recorded here. The format follows
   Reported under `identifier_namespace_issues[col]["near_duplicates"]`,
   alongside `["identifier_whitespace"]`, with matching counts in the
   summary and two new columns in the dashboard's identifier table.
+- Identifier checks now relate rows whose SMILES didn't parse to parsed
+  rows with the same identifier (#25), across both pools:
+  - `id_with_unparseable_and_valid_structures` (WARN): an identifier with a
+    valid structure in some rows and a broken, non-empty SMILES in others,
+    reported with both
+  - `missing_structure_resolvable_by_id` (WARN): an identifier with an
+    empty SMILES in some rows and a parsed structure elsewhere, with the
+    candidate structures, marked ambiguous if there are several
+
+  Each `unparseable_smiles` entry gains `resolvable_via_identifier` (the
+  column through which an empty SMILES can be filled in unambiguously), and
+  the summary gains `total_unparseable_resolvable_via_identifier`. The
+  dashboard's identifier table is now one row per check and one column per
+  identifier column.
 - A SMILES with a control character inside it (e.g. `"CC\nO"`) is now an
   unparseable `control_characters` failure. RDKit stops reading at the
   first whitespace, so it used to be silently read as `CC`.

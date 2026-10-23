@@ -43,7 +43,11 @@ issues. Built for sequential processing of datasets up to ~10,000 molecules.
   one structure, or a structure that's given more than one identifier, within
   the same identifier column. Identifier values are compared with
   surrounding whitespace stripped. Values that differ only in case or
-  `-`/`_` are flagged as near-duplicates.
+  `-`/`_` are flagged as near-duplicates. Rows whose SMILES didn't parse are
+  related back to the identifier as well: an identifier with a valid
+  structure in some rows and a broken SMILES in others is flagged, and an
+  empty SMILES whose identifier has exactly one structure elsewhere is
+  reported as resolvable (with the candidate structure).
 - **Quality filters**: mixtures/disconnected fragments, salts, solvates and
   metal complexes, and suspicious tiny fragments that look like stripped
   degradation artefacts (e.g. a bare cyanide left over from a failed
@@ -258,6 +262,7 @@ otherwise. Four rules decide the tier:
 | One identifier → several structures | | | FAIL |
 | One structure → several identifiers | | | WARN |
 | Identifier with surrounding whitespace; near-duplicate identifiers (case or `-`/`_` only) | | | WARN |
+| Identifier with valid and unparseable SMILES; empty SMILES resolvable via its identifier | | | WARN (the unparseable rows themselves still FAIL) |
 | Mixtures, salts/metal complexes, suspicious fragments | WARN | WARN | |
 | SMILES that only parses after stripping whitespace; RDKit parse warnings | WARN | WARN | |
 

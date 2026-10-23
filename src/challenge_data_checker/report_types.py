@@ -73,11 +73,22 @@ class Location(TypedDict):
     raw_smiles: str
 
 
-class UnparseableEntry(Location):
-    """A row whose SMILES could not be parsed or processed."""
+class UnparseableOccurrence(Location):
+    """A row whose SMILES could not be parsed, with why."""
 
     error: str
     category: str
+
+
+class UnparseableEntry(UnparseableOccurrence):
+    """A row whose SMILES could not be parsed or processed.
+
+    ``resolvable_via_identifier`` names an identifier column through which an
+    empty SMILES can be filled in: the row's identifier has exactly one
+    parsed structure elsewhere. ``None`` otherwise.
+    """
+
+    resolvable_via_identifier: str | None
 
 
 class RdkitWarningEntry(Location):
@@ -172,6 +183,27 @@ class NearDuplicateIdentifiers(TypedDict):
     identifiers: list[IdentifierOccurrences]
 
 
+class IdWithUnparseableAndValidStructures(TypedDict):
+    """An identifier with parsed structures in some rows and broken SMILES in others."""
+
+    identifier: str
+    structures: list[StructureOccurrences]
+    unparseable: list[UnparseableOccurrence]
+
+
+class MissingStructureResolvableById(TypedDict):
+    """An identifier with empty SMILES in some rows and parsed structures in others.
+
+    ``ambiguous`` is ``True`` when the identifier has more than one parsed
+    structure, so the empty rows can't be filled in unambiguously.
+    """
+
+    identifier: str
+    missing: list[Location]
+    candidates: list[StructureOccurrences]
+    ambiguous: bool
+
+
 class NamespaceIssues(TypedDict):
     """Identifier consistency findings for one identifier column."""
 
@@ -179,6 +211,8 @@ class NamespaceIssues(TypedDict):
     one_structure_multiple_ids: list[OneStructureMultipleIds]
     identifier_whitespace: list[IdentifierWhitespaceEntry]
     near_duplicates: list[NearDuplicateIdentifiers]
+    id_with_unparseable_and_valid_structures: list[IdWithUnparseableAndValidStructures]
+    missing_structure_resolvable_by_id: list[MissingStructureResolvableById]
 
 
 class QualityFlags(TypedDict):
@@ -198,6 +232,8 @@ class NamespaceIssueCounts(TypedDict):
     one_structure_multiple_ids: int
     identifier_whitespace: int
     near_duplicates: int
+    id_with_unparseable_and_valid_structures: int
+    missing_structure_resolvable_by_id: int
 
 
 # Overall audit result: FAIL if any blocking finding, WARN if only flagged
@@ -236,6 +272,7 @@ class Summary(TypedDict):
     total_unparseable_train: int
     total_unparseable_test: int
     total_unparseable_by_category: dict[str, int]
+    total_unparseable_resolvable_via_identifier: int
     total_exact_leaked_train_molecules: int
     total_exact_leaked_test_molecules: int
     total_salt_form_leaked_train_molecules: int

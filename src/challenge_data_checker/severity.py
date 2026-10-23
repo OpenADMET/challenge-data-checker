@@ -94,6 +94,8 @@ TIERS: dict[str, TierRule] = {
     "one_structure_multiple_ids": Severity.WARN,
     "identifier_whitespace": Severity.WARN,
     "identifier_near_duplicate": Severity.WARN,
+    "id_with_unparseable_and_valid_structures": Severity.WARN,
+    "missing_structure_resolvable_by_id": Severity.WARN,
     # Heuristic quality flags (rule 4)
     "mixture": Severity.WARN,
     "salt_or_metal_complex": Severity.WARN,
@@ -325,6 +327,15 @@ def collect_findings(
                 for loc in identifier["occurrences"]
             )
             yield Finding("identifier_near_duplicate", None, rows)
+        for broken in issues["id_with_unparseable_and_valid_structures"]:
+            rows = _rows(broken["unparseable"]) | frozenset(
+                _row_key(loc)
+                for structure in broken["structures"]
+                for loc in structure["occurrences"]
+            )
+            yield Finding("id_with_unparseable_and_valid_structures", None, rows)
+        for missing in issues["missing_structure_resolvable_by_id"]:
+            yield Finding("missing_structure_resolvable_by_id", None, _rows(missing["missing"]))
 
 
 def _drop_redundant(row_sets: Iterable[frozenset[RowKey]]) -> list[frozenset[RowKey]]:
