@@ -2,8 +2,8 @@
 
 from importlib.metadata import version
 
-from challenge_data_checker.api import audit
+from challenge_data_checker.api import audit, check
 
 __version__ = version("challenge-data-checker")
 
-__all__ = ["__version__", "audit"]
+__all__ = ["__version__", "audit", "check"]

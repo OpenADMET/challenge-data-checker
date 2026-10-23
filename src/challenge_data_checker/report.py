@@ -9,6 +9,7 @@ from typing import Literal
 
 from rich import box
 from rich.console import Console, Group, RenderableType
+from rich.markup import escape
 from rich.rule import Rule
 from rich.table import Table
 
@@ -20,7 +21,7 @@ from challenge_data_checker.checks import (
     train_test_leakage,
     unparseable_entries,
 )
-from challenge_data_checker.config import Config
+from challenge_data_checker.config import CheckConfig, Config
 from challenge_data_checker.io_utils import describe_source
 from challenge_data_checker.models import MoleculeRecord
 from challenge_data_checker.report_types import (
@@ -29,9 +30,12 @@ from challenge_data_checker.report_types import (
     REPRESENTATIONS,
     SALT_FORM_INSENSITIVE_REPRESENTATIONS,
     STEREO_INSENSITIVE_REPRESENTATIONS,
+    CheckReport,
+    CheckSummary,
     InternalDuplicates,
     LeakageFinding,
     Location,
+    NamespaceIssueCounts,
     NamespaceIssues,
     PerPool,
     QualityFlags,
@@ -42,6 +46,7 @@ from challenge_data_checker.report_types import (
 )
 from challenge_data_checker.severity import (
     QUALITY_FLAG_FINDING_TYPES,
+    Pool,
     Severity,
     TierContext,
     collect_findings,
@@ -200,6 +205,154 @@ def _mark_resolvable_rows(
         entry["resolvable_via_identifier"] = resolvable.get(key)
 
 
+def _namespace_counts(
+    namespace_issues: dict[str, NamespaceIssues],
+) -> dict[str, NamespaceIssueCounts]:
+    """Count each identifier column's namespace findings.
+
+    Parameters
+    ----------
+    namespace_issues : dict[str, NamespaceIssues]
+        The result of ``checks.identifier_namespace_issues``.
+
+    Returns
+    -------
+    dict[str, NamespaceIssueCounts]
+        Per identifier column, the number of findings of each kind.
+    """
+    return {
+        col: {
+            "one_id_multiple_structures": len(issues["one_id_multiple_structures"]),
+            "one_id_multiple_structures_by_type": dict(
+                sorted(
+                    Counter(
+                        c["conflict_type"] for c in issues["one_id_multiple_structures"]
+                    ).items()
+                )
+            ),
+            "one_structure_multiple_ids": len(issues["one_structure_multiple_ids"]),
+            "identifier_whitespace": len(issues["identifier_whitespace"]),
+            "near_duplicates": len(issues["near_duplicates"]),
+            "id_with_unparseable_and_valid_structures": len(
+                issues["id_with_unparseable_and_valid_structures"]
+            ),
+            "missing_structure_resolvable_by_id": len(issues["missing_structure_resolvable_by_id"]),
+        }
+        for col, issues in namespace_issues.items()
+    }
+
+
+def _unparseable_by_category(unparseable: list[UnparseableEntry]) -> dict[str, int]:
+    """Count unparseable rows per failure category.
+
+    Parameters
+    ----------
+    unparseable : list[UnparseableEntry]
+        The unparseable rows.
+
+    Returns
+    -------
+    dict[str, int]
+        Category to row count, sorted by category.
+    """
+    return dict(sorted(Counter(entry["category"] for entry in unparseable).items()))
+
+
+def _resolvable_count(unparseable: list[UnparseableEntry]) -> int:
+    """Count unparseable rows that an identifier can resolve.
+
+    Parameters
+    ----------
+    unparseable : list[UnparseableEntry]
+        The unparseable rows, after ``_mark_resolvable_rows``.
+
+    Returns
+    -------
+    int
+        Rows with ``resolvable_via_identifier`` set.
+    """
+    return sum(1 for entry in unparseable if entry["resolvable_via_identifier"] is not None)
+
+
+def build_check_report(
+    config: CheckConfig,
+    records: list[MoleculeRecord],
+    identifier_columns: list[str],
+    resolved_smiles_columns: dict[str, str] | None = None,
+) -> CheckReport:
+    """Run the single-dataset checks and assemble a check report.
+
+    Runs every check that doesn't need a train/test split: unparseable
+    SMILES, duplicates, identifier consistency and quality flags.
+
+    Parameters
+    ----------
+    config : CheckConfig
+        The validated check configuration.
+    records : list[MoleculeRecord]
+        Processed records of the dataset (pool ``"dataset"``).
+    identifier_columns : list[str]
+        Identifier columns present in the dataset.
+    resolved_smiles_columns : dict[str, str] | None
+        The SMILES column actually resolved for each source. Defaults to
+        an empty mapping.
+
+    Returns
+    -------
+    CheckReport
+        The report dict, containing the echoed config, a summary of counts,
+        and the detailed findings.
+    """
+    strip_salts = config.settings.strip_salts
+    unparseable = unparseable_entries(records)
+    dupes = internal_duplicates(records, identifier_columns, strip_salts)
+    namespace_issues = identifier_namespace_issues(records, identifier_columns, strip_salts)
+    _mark_resolvable_rows(unparseable, namespace_issues)
+    quality = quality_flag_entries(records)
+    status, blocking, flagged = summarise_tiers(
+        collect_findings(
+            unparseable, {}, {}, [], {"dataset": dupes}, namespace_issues, {"dataset": quality}
+        ),
+        TierContext(),
+    )
+    return {
+        "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "mode": "check",
+        "config": {
+            "files": [describe_source(s, i) for i, s in enumerate(config.paths.files)],
+            "smiles_column": config.columns.smiles_column,
+            "resolved_smiles_columns": resolved_smiles_columns or {},
+            "identifier_columns": identifier_columns,
+            "tautomer_standardisation": config.settings.tautomer_standardisation,
+            "strip_salts": strip_salts,
+            "identifier_case_insensitive": config.settings.identifier_case_insensitive,
+            "multi_component_min_heavy_atoms": config.settings.multi_component_min_heavy_atoms,
+            "report_format": config.settings.report_format,
+        },
+        "summary": {
+            "status": status,
+            "blocking": blocking,
+            "flagged": flagged,
+            "total_rows": len(records),
+            "total_unparseable": len(unparseable),
+            "total_unparseable_by_category": _unparseable_by_category(unparseable),
+            "total_unparseable_resolvable_via_identifier": _resolvable_count(unparseable),
+            "total_internal_duplicates": {name: len(dupes[name]) for name in REPRESENTATIONS},
+            "total_internal_duplicates_identifiers": {
+                col: len(found) for col, found in dupes["identifiers"].items()
+            },
+            "total_identifier_namespace_issues": _namespace_counts(namespace_issues),
+            "total_quality_flags": {
+                category: len(quality[category]) for category in QUALITY_FLAG_CATEGORIES
+            },
+        },
+        "unparseable_smiles": unparseable,
+        "internal_duplicates": dupes,
+        "identifier_namespace_issues": namespace_issues,
+        "quality_flags": quality,
+    }
+
+
 def build_report(
     config: Config,
     train_records: list[MoleculeRecord],
@@ -273,12 +426,8 @@ def build_report(
         "total_unparseable": len(unparseable),
         "total_unparseable_train": sum(1 for r in train_records if not r.is_parsed),
         "total_unparseable_test": sum(1 for r in test_records if not r.is_parsed),
-        "total_unparseable_resolvable_via_identifier": sum(
-            1 for entry in unparseable if entry["resolvable_via_identifier"] is not None
-        ),
-        "total_unparseable_by_category": dict(
-            sorted(Counter(entry["category"] for entry in unparseable).items())
-        ),
+        "total_unparseable_resolvable_via_identifier": _resolvable_count(unparseable),
+        "total_unparseable_by_category": _unparseable_by_category(unparseable),
         "total_exact_leaked_train_molecules": exact_train,
         "total_exact_leaked_test_molecules": exact_test,
         "total_salt_form_leaked_train_molecules": salt_form_train,
@@ -297,28 +446,7 @@ def build_report(
         "total_internal_duplicates_test_identifiers": {
             k: len(v) for k, v in test_dupes["identifiers"].items()
         },
-        "total_identifier_namespace_issues": {
-            col: {
-                "one_id_multiple_structures": len(issues["one_id_multiple_structures"]),
-                "one_id_multiple_structures_by_type": dict(
-                    sorted(
-                        Counter(
-                            c["conflict_type"] for c in issues["one_id_multiple_structures"]
-                        ).items()
-                    )
-                ),
-                "one_structure_multiple_ids": len(issues["one_structure_multiple_ids"]),
-                "identifier_whitespace": len(issues["identifier_whitespace"]),
-                "near_duplicates": len(issues["near_duplicates"]),
-                "id_with_unparseable_and_valid_structures": len(
-                    issues["id_with_unparseable_and_valid_structures"]
-                ),
-                "missing_structure_resolvable_by_id": len(
-                    issues["missing_structure_resolvable_by_id"]
-                ),
-            }
-            for col, issues in namespace_issues.items()
-        },
+        "total_identifier_namespace_issues": _namespace_counts(namespace_issues),
         "total_mixtures": {
             "train": len(quality_train["mixtures"]),
             "test": len(quality_test["mixtures"]),
@@ -342,6 +470,7 @@ def build_report(
 
     return {
         "generated_at": generated_at,
+        "mode": "audit",
         "config": {
             "train_files": [describe_source(s, i) for i, s in enumerate(config.paths.train_files)],
             "test_files": [describe_source(s, i) for i, s in enumerate(config.paths.test_files)],
@@ -370,15 +499,18 @@ def build_report(
     }
 
 
-def save_report(report: Report, output_path: str | Path, report_format: str = "json") -> None:
+def save_report(
+    report: Report | CheckReport, output_path: str | Path, report_format: str = "json"
+) -> None:
     """Write the report to disk as either indented JSON or human-readable text.
 
     Creates any missing parent directories of ``output_path``.
 
     Parameters
     ----------
-    report : Report
-        The report dict, as returned by ``build_report``.
+    report : Report | CheckReport
+        The report dict, as returned by ``build_report`` or
+        ``build_check_report``.
     output_path : str | Path
         Path to write the report to.
     report_format : str
@@ -421,31 +553,34 @@ def _fmt_counts(counts: Mapping[str, object]) -> str:
     return ", ".join(f"{k}={v}" for k, v in counts.items())
 
 
-def _tier_context(report: Report) -> TierContext:
+def _tier_context(report: Report | CheckReport) -> TierContext:
     """Rebuild the settings that finding tiers depend on from a report.
 
     Parameters
     ----------
-    report : Report
-        The report dict, as returned by ``build_report``.
+    report : Report | CheckReport
+        The report dict, as returned by ``build_report`` or
+        ``build_check_report``.
 
     Returns
     -------
     TierContext
         The tier context the report was built with.
     """
+    if report["mode"] == "check":
+        return TierContext()
     return TierContext(report["config"]["max_train_test_similarity"])
 
 
 _TIER_LABELS = {Severity.FAIL: "Blocking (FAIL)", Severity.WARN: "Flagged (WARN)"}
 
 
-def _tier_breakdown_lines(s: Summary) -> list[str]:
+def _tier_breakdown_lines(s: Summary | CheckSummary) -> list[str]:
     """Build the text lines summarising findings by severity tier.
 
     Parameters
     ----------
-    s : Summary
+    s : Summary | CheckSummary
         The report's ``"summary"`` dict.
 
     Returns
@@ -665,12 +800,12 @@ def _section_renderables(title: str, table: Table | None) -> list[RenderableType
     return [f"[bold cyan]{title}[/]", table if table is not None else placeholder, ""]
 
 
-def _severity_table(s: Summary) -> Table | None:
+def _severity_table(s: Summary | CheckSummary) -> Table | None:
     """Build the findings-by-severity table.
 
     Parameters
     ----------
-    s : Summary
+    s : Summary | CheckSummary
         The report's ``"summary"`` dict.
 
     Returns
@@ -735,46 +870,52 @@ def _leakage_table(s: Summary, context: TierContext) -> Table:
     return table
 
 
-def _duplicates_table(s: Summary, context: TierContext) -> Table:
-    """Build the internal (within-split) duplicates summary table.
+def _duplicates_table(
+    representation_counts: Mapping[Pool, Mapping[str, int]],
+    identifier_counts: Mapping[Pool, Mapping[str, int]],
+    context: TierContext,
+) -> Table:
+    """Build the internal (within-pool) duplicates summary table.
 
     Parameters
     ----------
-    s : Summary
-        The report's ``"summary"`` dict.
+    representation_counts : Mapping[Pool, Mapping[str, int]]
+        For each pool, the duplicate count per representation.
+    identifier_counts : Mapping[Pool, Mapping[str, int]]
+        For each pool, the duplicate count per identifier column.
     context : TierContext
         The settings finding tiers depend on.
 
     Returns
     -------
     Table
-        A rich table with one row per representation/identifier column,
-        showing train and test counts side by side.
+        A rich table with one row per representation/identifier column and
+        one count column per pool.
     """
-    table = _new_table(["Representation", "Train", "Test"])
+    pools = list(representation_counts)
+    table = _new_table(["Representation", *(pool.capitalize() for pool in pools)])
     for representation in REPRESENTATIONS:
         finding_type = duplicate_finding_type(representation)
         table.add_row(
             representation,
-            _status_cell(
-                s["total_internal_duplicates_train"][representation],
-                severity_of(finding_type, "train", context),
-            ),
-            _status_cell(
-                s["total_internal_duplicates_test"][representation],
-                severity_of(finding_type, "test", context),
+            *(
+                _status_cell(
+                    representation_counts[pool][representation],
+                    severity_of(finding_type, pool, context),
+                )
+                for pool in pools
             ),
         )
-    for col in s["total_internal_duplicates_train_identifiers"]:
+    columns = dict.fromkeys(col for pool in pools for col in identifier_counts[pool])
+    for col in columns:
         table.add_row(
-            f"identifier[{col}]",
-            _status_cell(
-                s["total_internal_duplicates_train_identifiers"][col],
-                severity_of("duplicate_identifier", "train", context),
-            ),
-            _status_cell(
-                s["total_internal_duplicates_test_identifiers"].get(col, 0),
-                severity_of("duplicate_identifier", "test", context),
+            escape(f"identifier[{col}]"),
+            *(
+                _status_cell(
+                    identifier_counts[pool].get(col, 0),
+                    severity_of("duplicate_identifier", pool, context),
+                )
+                for pool in pools
             ),
         )
     return table
@@ -808,12 +949,12 @@ _NAMESPACE_TABLE_ROWS: tuple[tuple[str, _NamespaceCountKey, str], ...] = (
 )
 
 
-def _namespace_table(s: Summary, context: TierContext) -> Table | None:
+def _namespace_table(s: Summary | CheckSummary, context: TierContext) -> Table | None:
     """Build the identifier namespace consistency summary table.
 
     Parameters
     ----------
-    s : Summary
+    s : Summary | CheckSummary
         The report's ``"summary"`` dict.
     context : TierContext
         The settings finding tiers depend on.
@@ -828,7 +969,7 @@ def _namespace_table(s: Summary, context: TierContext) -> Table | None:
     columns = s["total_identifier_namespace_issues"]
     if not columns:
         return None
-    table = _new_table(["Check", *columns])
+    table = _new_table(["Check", *(escape(col) for col in columns)])
     different = [
         c["one_id_multiple_structures_by_type"].get("different_compound", 0)
         for c in columns.values()
@@ -877,41 +1018,43 @@ _QUALITY_FLAG_LABELS: dict[str, str] = {
 }
 
 
-def _quality_table(s: Summary, context: TierContext) -> Table:
+def _quality_table(counts: Mapping[Pool, Mapping[str, int]], context: TierContext) -> Table:
     """Build the quality-filter flags summary table.
 
     Parameters
     ----------
-    s : Summary
-        The report's ``"summary"`` dict.
+    counts : Mapping[Pool, Mapping[str, int]]
+        For each pool, the count per quality-flag category.
     context : TierContext
         The settings finding tiers depend on.
 
     Returns
     -------
     Table
-        A rich table with one row per quality-filter category, showing
-        train and test counts side by side.
+        A rich table with one row per quality-filter category and one
+        count column per pool.
     """
-    table = _new_table(["Filter", "Train", "Test"])
+    pools = list(counts)
+    table = _new_table(["Filter", *(pool.capitalize() for pool in pools)])
     for category, label in _QUALITY_FLAG_LABELS.items():
-        counts = s["total_quality_flags"][category]
         finding_type = QUALITY_FLAG_FINDING_TYPES[category]
         assert finding_type is not None  # deprecated categories aren't labelled
         table.add_row(
             label,
-            _status_cell(counts["train"], severity_of(finding_type, "train", context)),
-            _status_cell(counts["test"], severity_of(finding_type, "test", context)),
+            *(
+                _status_cell(counts[pool][category], severity_of(finding_type, pool, context))
+                for pool in pools
+            ),
         )
     return table
 
 
-def _status_rule(s: Summary) -> Rule:
+def _status_rule(s: Summary | CheckSummary) -> Rule:
     """Build the overall PASS / WARN / FAIL banner.
 
     Parameters
     ----------
-    s : Summary
+    s : Summary | CheckSummary
         The report's ``"summary"`` dict.
 
     Returns
@@ -932,22 +1075,49 @@ def _status_rule(s: Summary) -> Rule:
     return Rule(f"[bold red]✗ OVERALL FAIL - {text}[/]", style="red")
 
 
-def print_summary(report: Report, report_output: str | Path | None) -> None:
-    """Print the stdout summary dashboard for a completed audit report.
+def _unparseable_line(s: Summary | CheckSummary, per_pool: str) -> str:
+    """Build the dashboard's unparseable-SMILES line.
+
+    Parameters
+    ----------
+    s : Summary | CheckSummary
+        The report's ``"summary"`` dict.
+    per_pool : str
+        A per-pool breakdown to show after the total (may be empty).
+
+    Returns
+    -------
+    str
+        A rich markup line with the total, breakdowns by pool and category,
+        and how many empty SMILES are resolvable via an identifier.
+    """
+    total = s["total_unparseable"]
+    line = f"  Unparseable SMILES : [{_count_style(total)}]{total}[/]{per_pool}"
+    if s["total_unparseable_by_category"]:
+        line += f" - {_fmt_counts(s['total_unparseable_by_category'])}"
+    if s["total_unparseable_resolvable_via_identifier"]:
+        line += f"; {s['total_unparseable_resolvable_via_identifier']} resolvable via identifier"
+    return line
+
+
+def print_summary(report: Report | CheckReport, report_output: str | Path | None) -> None:
+    """Print the stdout summary dashboard for a completed audit or check report.
 
     Renders row counts, unparseable SMILES, a findings-by-severity table,
     and one colored table per check category (green checkmarks for clean
     results, red crosses for blocking findings, yellow warning signs for
-    flagged ones), followed by an overall PASS/WARN/FAIL banner. The whole
-    dashboard is assembled into a single rich ``Group`` and printed with one
-    ``console.print`` call so it renders as one contiguous block rather than
-    several (in a Jupyter notebook, each individual ``console.print`` call
-    renders as its own separate output).
+    flagged ones), followed by an overall PASS/WARN/FAIL banner. A check
+    report has no leakage section. The whole dashboard is assembled into a
+    single rich ``Group`` and printed with one ``console.print`` call so it
+    renders as one contiguous block rather than several (in a Jupyter
+    notebook, each individual ``console.print`` call renders as its own
+    separate output).
 
     Parameters
     ----------
-    report : Report
-        The report dict, as returned by ``build_report``.
+    report : Report | CheckReport
+        The report dict, as returned by ``build_report`` or
+        ``build_check_report``.
     report_output : str | Path | None
         Path the full report was written to, shown in the final line of
         the dashboard, or ``None`` if it wasn't written to disk (that line
@@ -957,27 +1127,65 @@ def print_summary(report: Report, report_output: str | Path | None) -> None:
     -------
     None
     """
-    s = report["summary"]
     context = _tier_context(report)
+    sections: list[tuple[str, Table | None]] = []
+    if report["mode"] == "check":
+        cs = report["summary"]
+        s: Summary | CheckSummary = cs
+        title = "challenge-data-checker check summary"
+        rows_line = f"  Rows processed     : [bold]dataset[/]={cs['total_rows']}"
+        unparseable = _unparseable_line(cs, "")
+        sections.append(
+            (
+                "Duplicates (within dataset)",
+                _duplicates_table(
+                    {"dataset": cs["total_internal_duplicates"]},
+                    {"dataset": cs["total_internal_duplicates_identifiers"]},
+                    context,
+                ),
+            )
+        )
+        quality_counts: Mapping[Pool, Mapping[str, int]] = {"dataset": cs["total_quality_flags"]}
+    else:
+        audit = report["summary"]
+        s = audit
+        title = "challenge-data-checker audit summary"
+        rows_line = (
+            f"  Rows processed     : [bold]train[/]={audit['total_train_rows']}  "
+            f"[bold]test[/]={audit['total_test_rows']}"
+        )
+        unparseable = _unparseable_line(
+            audit,
+            f" (train={audit['total_unparseable_train']}, "
+            f"test={audit['total_unparseable_test']})",
+        )
+        sections.append(("Train-test leakage", _leakage_table(audit, context)))
+        sections.append(
+            (
+                "Internal duplicates (within split)",
+                _duplicates_table(
+                    {
+                        "train": audit["total_internal_duplicates_train"],
+                        "test": audit["total_internal_duplicates_test"],
+                    },
+                    {
+                        "train": audit["total_internal_duplicates_train_identifiers"],
+                        "test": audit["total_internal_duplicates_test_identifiers"],
+                    },
+                    context,
+                ),
+            )
+        )
+        quality_counts = {
+            pool: {cat: n[pool] for cat, n in audit["total_quality_flags"].items()}
+            for pool in ("train", "test")
+        }
 
     renderables: list[RenderableType] = [
-        Rule("[bold cyan]challenge-data-checker audit summary[/]", style="cyan"),
+        Rule(f"[bold cyan]{title}[/]", style="cyan"),
         f"  Generated          : {report['generated_at']}",
-        f"  Rows processed     : [bold]train[/]={s['total_train_rows']}  "
-        f"[bold]test[/]={s['total_test_rows']}",
-        f"  Unparseable SMILES : "
-        f"[{_count_style(s['total_unparseable'])}]{s['total_unparseable']}[/] "
-        f"(train={s['total_unparseable_train']}, test={s['total_unparseable_test']})"
-        + (
-            f" - {_fmt_counts(s['total_unparseable_by_category'])}"
-            if s["total_unparseable_by_category"]
-            else ""
-        )
-        + (
-            f"; {s['total_unparseable_resolvable_via_identifier']} resolvable via identifier"
-            if s["total_unparseable_resolvable_via_identifier"]
-            else ""
-        ),
+        rows_line,
+        unparseable,
         "  Legend             : [bold red]✗ blocking (FAIL)[/]  "
         "[bold yellow]⚠ flagged for review (WARN)[/]  [bold green]✓ clean[/]",
         "",
@@ -985,14 +1193,14 @@ def print_summary(report: Report, report_output: str | Path | None) -> None:
     severity_table = _severity_table(s)
     if severity_table is not None:
         renderables.extend(_section_renderables("Findings by severity", severity_table))
-    renderables.extend(_section_renderables("Train-test leakage", _leakage_table(s, context)))
-    renderables.extend(
-        _section_renderables("Internal duplicates (within split)", _duplicates_table(s, context))
-    )
+    for section_title, table in sections:
+        renderables.extend(_section_renderables(section_title, table))
     renderables.extend(
         _section_renderables("Identifier namespace issues", _namespace_table(s, context))
     )
-    renderables.extend(_section_renderables("Quality filter flags", _quality_table(s, context)))
+    renderables.extend(
+        _section_renderables("Quality filter flags", _quality_table(quality_counts, context))
+    )
     renderables.append(_status_rule(s))
     if report_output is not None:
         renderables.append(f"Full detailed report written to: [bold]{report_output}[/]")
@@ -1000,15 +1208,15 @@ def print_summary(report: Report, report_output: str | Path | None) -> None:
     Console(highlight=False).print(Group(*renderables))
 
 
-def _tag(finding_type: str, pool: Literal["train", "test"] | None, context: TierContext) -> str:
+def _tag(finding_type: str, pool: Pool | None, context: TierContext) -> str:
     """Build the ``[FAIL]`` / ``[WARN]`` prefix for a finding line in the text report.
 
     Parameters
     ----------
     finding_type : str
         The finding's type (see ``severity.TIERS``).
-    pool : Literal["train", "test"] | None
-        The pool of a within-pool finding, or ``None`` if it spans both.
+    pool : Pool | None
+        The pool of a within-pool finding, or ``None`` if it spans pools.
     context : TierContext
         The settings the finding's tier may depend on.
 
@@ -1154,16 +1362,14 @@ def _tanimoto_lines(tanimoto: list[TanimotoFinding], context: TierContext) -> li
     return lines
 
 
-def _internal_duplicates_lines(
-    dupes: InternalDuplicates, pool: Literal["train", "test"]
-) -> list[str]:
+def _internal_duplicates_lines(dupes: InternalDuplicates, pool: Pool) -> list[str]:
     """Render within-split internal duplicate findings.
 
     Parameters
     ----------
     dupes : InternalDuplicates
         The result of ``checks.internal_duplicates`` for one pool.
-    pool : Literal["train", "test"]
+    pool : Pool
         Which pool ``dupes`` is from, which the findings' tier depends on.
 
     Returns
@@ -1277,14 +1483,14 @@ def _identifier_namespace_lines(namespace_issues: dict[str, NamespaceIssues]) ->
     return lines
 
 
-def _quality_flag_lines(quality_flags: QualityFlags, pool: Literal["train", "test"]) -> list[str]:
+def _quality_flag_lines(quality_flags: QualityFlags, pool: Pool) -> list[str]:
     """Render quality-filter findings (mixtures, salts/metals, suspicious fragments).
 
     Parameters
     ----------
     quality_flags : QualityFlags
         The result of ``quality_flag_entries`` for one pool.
-    pool : Literal["train", "test"]
+    pool : Pool
         Which pool ``quality_flags`` is from.
 
     Returns
@@ -1321,12 +1527,123 @@ def _quality_flag_lines(quality_flags: QualityFlags, pool: Literal["train", "tes
     return lines
 
 
-def format_report_as_text(report: Report) -> str:
-    """Render the full audit report as human-readable, indented plain text.
+def format_report_as_text(report: Report | CheckReport) -> str:
+    """Render a full audit or check report as human-readable, indented plain text.
 
     Contains the same findings as the JSON report (exact row indices, source
     files, values, and similarity scores) rendered as prose instead of raw
     JSON, for easier manual review.
+
+    Parameters
+    ----------
+    report : Report | CheckReport
+        The report dict, as returned by ``build_report`` or
+        ``build_check_report``.
+
+    Returns
+    -------
+    str
+        The full text report as a single string.
+    """
+    if report["mode"] == "check":
+        return _format_check_report_as_text(report)
+    return _format_audit_report_as_text(report)
+
+
+def _unparseable_lines(unparseable: list[UnparseableEntry]) -> list[str]:
+    """Render unparseable-SMILES rows with their category and RDKit message.
+
+    Parameters
+    ----------
+    unparseable : list[UnparseableEntry]
+        The report's ``unparseable_smiles``.
+
+    Returns
+    -------
+    list[str]
+        One line per row, noting when an identifier can resolve it.
+    """
+    tag = _tag("unparseable_smiles", None, TierContext())
+    return [
+        f"  {tag} {_fmt_location(entry)} -- {entry['category']}: {entry['error']}"
+        + (
+            f" (resolvable via identifier column {entry['resolvable_via_identifier']!r})"
+            if entry["resolvable_via_identifier"]
+            else ""
+        )
+        for entry in unparseable
+    ]
+
+
+def _format_check_report_as_text(report: CheckReport) -> str:
+    """Render a single-dataset check report as plain text.
+
+    Parameters
+    ----------
+    report : CheckReport
+        The report dict, as returned by ``build_check_report``.
+
+    Returns
+    -------
+    str
+        The full text report as a single string.
+    """
+    cfg = report["config"]
+    s = report["summary"]
+    lines = [
+        "=" * 72,
+        "challenge-data-checker check report",
+        "=" * 72,
+        f"Generated: {report['generated_at']}",
+        "",
+        "Configuration",
+        "-------------",
+        f"  files                    : {cfg['files']}",
+        f"  smiles_column            : {cfg['smiles_column']}",
+        f"  identifier_columns       : {cfg['identifier_columns']}",
+        f"  tautomer_standardisation : {cfg['tautomer_standardisation']}",
+        f"  strip_salts              : {cfg['strip_salts']}",
+        f"  identifier_case_insens.  : {cfg['identifier_case_insensitive']}",
+        f"  multi_component_min_heavy: {cfg['multi_component_min_heavy_atoms']}",
+        "",
+        "=" * 60,
+        "challenge-data-checker check summary",
+        "=" * 60,
+        *_tier_breakdown_lines(s),
+        "",
+        f"Rows processed        : {s['total_rows']}",
+        f"Unparseable SMILES    : {s['total_unparseable']}",
+    ]
+    if s["total_unparseable_by_category"]:
+        lines.append(f"  by category        : {_fmt_counts(s['total_unparseable_by_category'])}")
+    lines.append(f"Duplicates            : {_fmt_counts(s['total_internal_duplicates'])}")
+    if s["total_internal_duplicates_identifiers"]:
+        ids = _fmt_counts(s["total_internal_duplicates_identifiers"])
+        lines.append(f"  identifiers        : {ids}")
+    lines.append("Quality filter flags")
+    for category, label in _QUALITY_FLAG_LABELS.items():
+        lines.append(f"  {label:<28}: {s['total_quality_flags'][category]}")
+    lines.append("=" * 60)
+    lines.append("")
+    lines.extend(_section("Unparseable SMILES", _unparseable_lines(report["unparseable_smiles"])))
+    lines.extend(
+        _section(
+            "Duplicates Within Dataset",
+            _internal_duplicates_lines(report["internal_duplicates"], "dataset"),
+        )
+    )
+    lines.extend(
+        _section(
+            "Identifier Namespace Issues",
+            _identifier_namespace_lines(report["identifier_namespace_issues"]),
+        )
+    )
+    lines.extend(_section("Quality Flags", _quality_flag_lines(report["quality_flags"], "dataset")))
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _format_audit_report_as_text(report: Report) -> str:
+    """Render a train/test audit report as plain text.
 
     Parameters
     ----------
@@ -1340,7 +1657,6 @@ def format_report_as_text(report: Report) -> str:
     """
     cfg = report["config"]
     context = _tier_context(report)
-    unparseable_tag = _tag("unparseable_smiles", "train", context)
     lines = [
         "=" * 72,
         "challenge-data-checker audit report",
@@ -1356,6 +1672,7 @@ def format_report_as_text(report: Report) -> str:
         f"  tautomer_standardisation : {cfg['tautomer_standardisation']}",
         f"  strip_salts              : {cfg['strip_salts']}",
         f"  identifier_case_insens.  : {cfg['identifier_case_insensitive']}",
+        f"  multi_component_min_heavy: {cfg['multi_component_min_heavy_atoms']}",
         f"  max_train_test_similarity: {cfg['max_train_test_similarity']}",
         f"  fp_radius                : {cfg['fp_radius']}",
         f"  fp_n_bits                : {cfg['fp_n_bits']}",
@@ -1364,21 +1681,7 @@ def format_report_as_text(report: Report) -> str:
     lines.extend(_build_summary_lines(report))
     lines.append("")
 
-    lines.extend(
-        _section(
-            "Unparseable SMILES",
-            [
-                f"  {unparseable_tag} {_fmt_location(entry)} -- "
-                f"{entry['category']}: {entry['error']}"
-                + (
-                    f" (resolvable via identifier column {entry['resolvable_via_identifier']!r})"
-                    if entry["resolvable_via_identifier"]
-                    else ""
-                )
-                for entry in report["unparseable_smiles"]
-            ],
-        )
-    )
+    lines.extend(_section("Unparseable SMILES", _unparseable_lines(report["unparseable_smiles"])))
     lines.extend(
         _section(
             "Train-Test Leakage: Exact Matches",

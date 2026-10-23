@@ -40,7 +40,9 @@ from challenge_data_checker.report_types import (
     UnparseableEntry,
 )
 
-type Pool = Literal["train", "test"]
+# "dataset" is the single pool of a standalone check. Per-pool rules treat it
+# like the training set: the checker can't know it will become a test set.
+type Pool = Literal["train", "test", "dataset"]
 type RowKey = tuple[str, str, int]
 
 
@@ -160,7 +162,7 @@ def severity_of(finding_type: str, pool: Pool | None, context: TierContext) -> S
     if isinstance(rule, dict):
         if pool is None:
             raise ValueError(f"Finding type '{finding_type}' needs a pool to determine its tier.")
-        return rule[pool]
+        return rule["test"] if pool == "test" else rule["train"]
     return rule(context)
 
 
@@ -261,9 +263,9 @@ def collect_findings(
     exact_leakage: dict[str, list[LeakageFinding]],
     identifier_leakage: dict[str, list[LeakageFinding]],
     tanimoto: list[TanimotoFinding],
-    internal_duplicates: PerPool[InternalDuplicates],
+    internal_duplicates: dict[Pool, InternalDuplicates],
     namespace_issues: dict[str, NamespaceIssues],
-    quality_flags: PerPool[QualityFlags],
+    quality_flags: dict[Pool, QualityFlags],
 ) -> Iterator[Finding]:
     """Reduce every check's results to typed findings with their rows.
 
@@ -277,12 +279,12 @@ def collect_findings(
         The report's ``train_test_leakage["identifiers"]``.
     tanimoto : list[TanimotoFinding]
         The report's ``train_test_leakage["tanimoto_similarity"]``.
-    internal_duplicates : PerPool[InternalDuplicates]
-        The report's ``internal_duplicates``.
+    internal_duplicates : dict[Pool, InternalDuplicates]
+        Within-pool duplicates for each pool.
     namespace_issues : dict[str, NamespaceIssues]
         The report's ``identifier_namespace_issues``.
-    quality_flags : PerPool[QualityFlags]
-        The report's ``quality_flags``.
+    quality_flags : dict[Pool, QualityFlags]
+        Quality flags for each pool.
 
     Yields
     ------
@@ -290,8 +292,7 @@ def collect_findings(
         One finding per reported item, before any merging.
     """
     for entry in unparseable:
-        pool: Pool = "train" if entry["pool"] == "train" else "test"
-        yield Finding("unparseable_smiles", pool, _rows([entry]))
+        yield Finding("unparseable_smiles", None, _rows([entry]))
 
     for representation, leaks in exact_leakage.items():
         for leak in leaks:
@@ -304,8 +305,7 @@ def collect_findings(
     for pair in tanimoto:
         yield Finding("tanimoto_similarity", None, _rows([pair["train"], pair["test"]]))
 
-    for pool in ("train", "test"):
-        dupes = internal_duplicates[pool]
+    for pool, dupes in internal_duplicates.items():
         for representation in REPRESENTATIONS:
             for dupe in dupes[representation]:
                 yield Finding(
@@ -315,7 +315,7 @@ def collect_findings(
             for dupe in id_dupes:
                 yield Finding("duplicate_identifier", pool, _rows(dupe["occurrences"]))
 
-        flags = quality_flags[pool]
+    for pool, flags in quality_flags.items():
         for category in QUALITY_FLAG_CATEGORIES:
             quality_type = QUALITY_FLAG_FINDING_TYPES[category]
             if quality_type is None:

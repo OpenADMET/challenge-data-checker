@@ -1,14 +1,20 @@
 """Shared execution pipeline: load pools, process molecules, build/save/print a report.
 
-Used by both the TOML-config CLI (``cli.run``) and the direct Python API
-(``api.audit``), which differ only in how they build the ``Config`` passed in.
+Used by both the CLI (``cli.run`` / ``cli.run_check``) and the direct Python
+API (``api.audit`` / ``api.check``), which differ only in how they build the
+configuration passed in.
 """
 
 from challenge_data_checker.chemistry import MoleculeProcessor, process_pool
-from challenge_data_checker.config import Config
+from challenge_data_checker.config import CheckConfig, Config
 from challenge_data_checker.io_utils import load_pool
-from challenge_data_checker.report import build_report, print_summary, save_report
-from challenge_data_checker.report_types import PerPool, Report
+from challenge_data_checker.report import (
+    build_check_report,
+    build_report,
+    print_summary,
+    save_report,
+)
+from challenge_data_checker.report_types import CheckReport, PerPool, Report
 
 
 def run_audit(config: Config, *, save: bool = True, print_report: bool = True) -> Report:
@@ -59,6 +65,40 @@ def run_audit(config: Config, *, save: bool = True, print_report: bool = True) -
     report = build_report(
         config, train_records, test_records, identifier_columns, resolved_smiles_columns
     )
+
+    if save and config.paths.report_output is not None:
+        save_report(report, config.paths.report_output, config.settings.report_format)
+    if print_report:
+        print_summary(report, config.paths.report_output)
+    return report
+
+
+def run_check(config: CheckConfig, *, save: bool = True, print_report: bool = True) -> CheckReport:
+    """Run the single-dataset check pipeline for an already-built configuration.
+
+    Parameters
+    ----------
+    config : CheckConfig
+        The check configuration to run with, however it was built (from a
+        TOML file, CLI flags, or ``api.check``).
+    save : bool
+        Whether to write the report to ``config.paths.report_output``.
+        Has no effect if ``report_output`` is ``None``.
+    print_report : bool
+        Whether to print the stdout summary dashboard.
+
+    Returns
+    -------
+    CheckReport
+        The JSON-serialisable check report, as returned by
+        ``report.build_check_report``.
+    """
+    df, identifier_columns, smiles_columns = load_pool(
+        config.paths.files, config.columns.smiles_column, config.columns.identifier_columns
+    )
+    processor = MoleculeProcessor(config.settings)
+    records = process_pool(df, "dataset", identifier_columns, processor)
+    report = build_check_report(config, records, identifier_columns, smiles_columns)
 
     if save and config.paths.report_output is not None:
         save_report(report, config.paths.report_output, config.settings.report_format)

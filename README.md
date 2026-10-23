@@ -255,6 +255,59 @@ In the report, an in-memory DataFrame is labelled
 `<in-memory dataframe #N (R rows)>` (by its position in the list) wherever a
 file path would otherwise appear.
 
+### Checking a single dataset
+
+To check one dataset on its own, without a train/test split (e.g. before
+splitting, publishing or accepting it), use `check`. It runs every check
+that doesn't need a split: unparseable SMILES, duplicates, identifier
+consistency and the quality flags. It uses the same severity tiers and exit
+codes as the audit. Duplicates within the dataset are flagged (WARN), as in
+a training set, since the checker can't know whether it will be scored.
+There are three equivalent ways to run it:
+
+```bash
+# Flags
+challenge-data-checker check --files data/raw_a.csv data/raw_b.tsv \
+    --smiles-column SMILES --identifier-columns compound_id \
+    --report-output reports/check.json
+
+# A TOML file
+challenge-data-checker check --config check.toml
+```
+
+```python
+from challenge_data_checker import check
+
+report = check(["data/raw_a.csv", "data/raw_b.tsv"], identifier_columns=["compound_id"])
+```
+
+A check config has the same layout as an audit config, except that `[paths]`
+takes `files` instead of `train_files`/`test_files`, and `report_output` is
+optional:
+
+```toml
+[paths]
+files = ["data/dataset.csv"]
+report_output = "reports/check_report.json"   # optional
+
+[columns]
+smiles_column = "SMILES"
+identifier_columns = ["compound_id"]
+
+[settings]
+tautomer_standardisation = false
+strip_salts = true
+```
+
+Every flag maps to one TOML key (`--strip-salts`/`--no-strip-salts`,
+`--tautomer-standardisation`, `--identifier-case-insensitive`,
+`--multi-component-min-heavy-atoms`, `--report-format`). `--config` can't be
+combined with them. Settings that only make sense for a split
+(`max_train_test_similarity`, `fp_radius`, `fp_n_bits`) are rejected in a
+check config. Passing an audit config to `check`, or a check config to the
+audit, is an error that tells you which command to use. The report has
+`"mode": "check"`, and its rows are in the pool `"dataset"`.
+
 ## Output
 
 ### Severity tiers

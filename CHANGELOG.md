@@ -8,6 +8,16 @@ All notable changes to this project are recorded here. The format follows
 
 ### Added
 
+- **Single-dataset `check` mode (#19)**: `challenge-data-checker check
+  --files …` (or `check --config check.toml`) and `check()` in Python run
+  every check that doesn't need a train/test split (unparseable SMILES,
+  duplicates, identifier consistency, quality flags) on one dataset, with
+  the same severity tiers, exit codes and `--strict`. Duplicates within the
+  checked dataset are WARN. A check TOML takes `[paths] files` with an
+  optional `report_output`, and every CLI flag maps to a TOML key.
+  Combining `--config` with flags, or passing the wrong kind of config to
+  either command, is a clear error. The report has `"mode": "check"`; audit
+  reports now carry `"mode": "audit"`.
 - Undefined-stereochemistry quality flag, `undefined_stereo` (WARN, #19):
   entries with unspecified stereocentres (including ring cis/trans and
   sulfoxides) or stereo double bonds, found with RDKit's
@@ -88,8 +98,9 @@ All notable changes to this project are recorded here. The format follows
     flagged) and adds a findings-by-severity table. Text report findings
     are tagged `[FAIL]` or `[WARN]`.
   - **CLI exit codes:** `2` when the result is `FAIL`, or `WARN` with the
-    new `--strict` flag. `1` still means a configuration or input error.
-    Previously the CLI exited `0` whenever the audit ran.
+    new `--strict` flag. `1` means a configuration, input or command-line
+    usage error (argparse's own usage errors used to exit `2`). Previously
+    the CLI exited `0` whenever the audit ran.
   - The Tanimoto check is WARN at the default threshold of `1.0`, where it
     only catches fingerprint collisions, and FAIL when you lower the
     threshold.

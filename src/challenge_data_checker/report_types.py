@@ -381,6 +381,7 @@ class Report(TypedDict):
     """The full audit report."""
 
     generated_at: str
+    mode: Literal["audit"]
     config: ReportConfig
     summary: Summary
     unparseable_smiles: list[UnparseableEntry]
@@ -388,3 +389,51 @@ class Report(TypedDict):
     internal_duplicates: PerPool[InternalDuplicates]
     identifier_namespace_issues: dict[str, NamespaceIssues]
     quality_flags: PerPool[QualityFlags]
+
+
+class CheckSummary(TypedDict):
+    """Headline counts for a single-dataset check."""
+
+    status: Status
+    blocking: TierSummary
+    flagged: TierSummary
+    total_rows: int
+    total_unparseable: int
+    total_unparseable_by_category: dict[str, int]
+    total_unparseable_resolvable_via_identifier: int
+    total_internal_duplicates: dict[str, int]
+    total_internal_duplicates_identifiers: dict[str, int]
+    total_identifier_namespace_issues: dict[str, NamespaceIssueCounts]
+    total_quality_flags: dict[str, int]
+
+
+class CheckReportConfig(TypedDict):
+    """The configuration echoed back into a check report."""
+
+    files: list[str]
+    smiles_column: str
+    resolved_smiles_columns: dict[str, str]
+    identifier_columns: list[str]
+    tautomer_standardisation: bool
+    strip_salts: bool
+    identifier_case_insensitive: bool
+    multi_component_min_heavy_atoms: int
+    report_format: str
+
+
+class CheckReport(TypedDict):
+    """The report of a single-dataset check: the audit's single-pool sections.
+
+    Rows are in the ``"dataset"`` pool. Duplicates within the dataset are
+    flagged (WARN), as for a training set, since the checker can't know
+    whether the dataset will be a test set.
+    """
+
+    generated_at: str
+    mode: Literal["check"]
+    config: CheckReportConfig
+    summary: CheckSummary
+    unparseable_smiles: list[UnparseableEntry]
+    internal_duplicates: InternalDuplicates
+    identifier_namespace_issues: dict[str, NamespaceIssues]
+    quality_flags: QualityFlags
