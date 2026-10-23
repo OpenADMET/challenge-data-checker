@@ -8,6 +8,10 @@ All notable changes to this project are recorded here. The format follows
 
 ### Added
 
+- `skills/challenge-data-checker/SKILL.md`: an Agent Skills file teaching
+  an AI agent to run the checker, pre-process inputs it can't handle (e.g.
+  batch-to-parent ID trimming), and triage findings into ground-truth
+  leaks, test-set membership disclosure, or expected noise (#16).
 - **Single-dataset `check` mode (#19)**: `challenge-data-checker check
   --files …` (or `check --config check.toml`) and `check()` in Python run
   every check that doesn't need a train/test split (unparseable SMILES,

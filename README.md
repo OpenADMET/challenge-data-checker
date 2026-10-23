@@ -308,6 +308,15 @@ check config. Passing an audit config to `check`, or a check config to the
 audit, is an error that tells you which command to use. The report has
 `"mode": "check"`, and its rows are in the pool `"dataset"`.
 
+### Using it from an AI agent
+
+[`skills/challenge-data-checker/SKILL.md`](skills/challenge-data-checker/SKILL.md)
+is an [Agent Skills](https://agentskills.io) file. It teaches an agent when
+and how to run the checker, which pre-processing steps it can't do itself
+(e.g. trimming batch IDs to parent IDs), and how to triage the findings into
+a verdict: ground-truth leak, test-set membership disclosure, or expected
+noise.
+
 ## Output
 
 ### Severity tiers
