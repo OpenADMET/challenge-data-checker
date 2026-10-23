@@ -171,10 +171,28 @@ class StructureOccurrences(TypedDict):
     occurrences: list[Location]
 
 
+# How the structures behind one identifier differ, from the finest level
+# that unifies them all: tautomer/representation, salt form, stereochemistry,
+# or not at all (genuinely different compounds).
+type IdConflictType = Literal["tautomer", "salt_form", "stereo", "different_compound"]
+
+# How the structures given several identifiers relate: identical, the same
+# parent in different salt forms, or the same connectivity with different
+# stereochemistry.
+type SharedStructureType = Literal["same_structure", "salt_form", "stereo"]
+
+
 class OneIdMultipleStructures(TypedDict):
-    """A single identifier value mapped to two or more distinct structures."""
+    """A single identifier value mapped to two or more distinct structures.
+
+    ``max_similarity`` is the highest Tanimoto similarity between the
+    structures, which helps tell a near-analogue mix-up from an unrelated
+    one; ``None`` if fingerprints weren't available.
+    """
 
     identifier: str
+    conflict_type: IdConflictType
+    max_similarity: float | None
     structures: list[StructureOccurrences]
 
 
@@ -186,8 +204,16 @@ class IdentifierOccurrences(TypedDict):
 
 
 class OneStructureMultipleIds(TypedDict):
-    """A single structure given two or more distinct identifier values."""
+    """A single compound given two or more distinct identifier values.
 
+    Rows are grouped by the connectivity of their parent compound, so the
+    same compound in different salt forms or with different stereo
+    annotation is caught too; ``conflict_type`` says how the structures
+    relate. ``canonical_smiles`` and ``inchikey`` are those of the first
+    row, as a representative.
+    """
+
+    conflict_type: SharedStructureType
     canonical_smiles: str | None
     inchikey: str | None
     identifiers: list[IdentifierOccurrences]
@@ -259,6 +285,7 @@ class NamespaceIssueCounts(TypedDict):
     """Finding counts for one identifier column's namespace checks."""
 
     one_id_multiple_structures: int
+    one_id_multiple_structures_by_type: dict[str, int]
     one_structure_multiple_ids: int
     identifier_whitespace: int
     near_duplicates: int

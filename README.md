@@ -40,8 +40,12 @@ issues. Built for sequential processing of datasets up to ~10,000 molecules.
   racemate/enantiomer pairs, via the InChIKey connectivity block) and per
   identifier column.
 - **Identifier namespace checks**: flags an identifier that maps to more than
-  one structure, or a structure that's given more than one identifier, within
-  the same identifier column. Identifier values are compared with
+  one structure, or a compound that's given more than one identifier, within
+  the same identifier column. Each identifier conflict is classified as
+  `salt_form`, `stereo`, `tautomer` or `different_compound` (with the
+  highest Tanimoto similarity between the structures), and only
+  `different_compound` blocks. A compound with several identifiers is
+  found even when its salt form or stereo annotation differs between rows. Identifier values are compared with
   surrounding whitespace stripped. Values that differ only in case or
   `-`/`_` are flagged as near-duplicates. Rows whose SMILES didn't parse are
   related back to the identifier as well: an identifier with a valid
@@ -273,8 +277,9 @@ otherwise. Four rules decide the tier:
 | Tanimoto similarity ≥ threshold | | | WARN at the default `1.0`; FAIL if you lower it |
 | Duplicate structure, salt form or identifier | WARN | FAIL | |
 | Duplicate stereoisomer (e.g. racemate and enantiomer) | WARN | WARN | |
-| One identifier → several structures | | | FAIL |
-| One structure → several identifiers | | | WARN |
+| One identifier → several different compounds | | | FAIL |
+| One identifier → salt-form, stereo or tautomer variants of one compound | | | WARN |
+| One compound (any salt form or stereo) → several identifiers | | | WARN |
 | Identifier with surrounding whitespace; near-duplicate identifiers (case or `-`/`_` only) | | | WARN |
 | Identifier with valid and unparseable SMILES; empty SMILES resolvable via its identifier | | | WARN (the unparseable rows themselves still FAIL) |
 | Homodimer without counterion; net formal charge ≠ 0 | FAIL | FAIL | |

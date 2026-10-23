@@ -88,6 +88,21 @@ All notable changes to this project are recorded here. The format follows
   - The Tanimoto check is WARN at the default threshold of `1.0`, where it
     only catches fingerprint collisions, and FAIL when you lower the
     threshold.
+- **Identifier conflicts are classified (#27).** Each
+  `one_id_multiple_structures` finding gains a `conflict_type`:
+  - `salt_form`: same parent compound
+  - `stereo`: same connectivity, salt form may also differ
+  - `tautomer`: same InChIKey or same tautomer-canonical structure
+  - `different_compound`
+
+  It also gains `max_similarity` (the highest Tanimoto between the
+  structures). Only `different_compound` stays blocking (FAIL); the others
+  are now flagged (WARN, finding type `one_id_structure_variants`).
+  `one_structure_multiple_ids` now groups rows by the connectivity of
+  their parent compound, so a compound given several identifiers is found
+  even when its salt form or stereo annotation differs, with a
+  `conflict_type` of `same_structure`, `salt_form` or `stereo`. The summary
+  gains `one_id_multiple_structures_by_type`.
 - **Breaking: the mixture and salt quality flags are split (#26).**
   Multi-fragment entries are now classified as one of:
   - `salt_or_solvate` (WARN): a parent compound plus known counterions,

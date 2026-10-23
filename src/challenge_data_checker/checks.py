@@ -3,15 +3,17 @@
 import logging
 import re
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import TypedDict
 
-from rdkit import DataStructs
+from rdkit import Chem, DataStructs
+from rdkit.Chem.MolStandardize import rdMolStandardize
 
-from challenge_data_checker.models import MoleculeRecord
+from challenge_data_checker.models import Fingerprint, MoleculeRecord
 from challenge_data_checker.report_types import (
     COARSE_REPRESENTATIONS,
     DuplicateFinding,
+    IdConflictType,
     IdentifierOccurrences,
     IdentifierWhitespaceEntry,
     IdWithUnparseableAndValidStructures,
@@ -23,6 +25,7 @@ from challenge_data_checker.report_types import (
     OneIdMultipleStructures,
     OneStructureMultipleIds,
     Representation,
+    SharedStructureType,
     StructureOccurrences,
     TanimotoFinding,
     UnparseableEntry,
@@ -338,7 +341,7 @@ def internal_duplicates(
 
 
 def identifier_namespace_issues(
-    all_records: list[MoleculeRecord], identifier_columns: list[str]
+    all_records: list[MoleculeRecord], identifier_columns: list[str], strip_salts: bool = True
 ) -> dict[str, NamespaceIssues]:
     """Check identifier-to-structure consistency within each identifier column.
 
@@ -347,10 +350,12 @@ def identifier_namespace_issues(
     ``MoleculeProcessor.normalise_identifier``):
         - ``one_id_multiple_structures``: a single identifier string maps to
           2+ structurally distinct molecules (differing canonical SMILES
-          and/or InChIKey).
-        - ``one_structure_multiple_ids``: a single structure (same canonical
-          SMILES AND InChIKey) is given 2+ distinct identifier strings within
-          that column.
+          and/or InChIKey), with a ``conflict_type`` saying how they differ
+          (see ``_id_conflict_type``).
+        - ``one_structure_multiple_ids``: a single compound (same parent
+          connectivity, see ``_compound_key``) is given 2+ distinct
+          identifier strings within that column, with a ``conflict_type``
+          saying how its structures relate.
         - ``identifier_whitespace``: rows whose raw value had surrounding
           whitespace (stripped before every comparison).
         - ``near_duplicates``: distinct values that only differ in case or
@@ -370,6 +375,8 @@ def identifier_namespace_issues(
         Processed records from both the training and test pools, combined.
     identifier_columns : list[str]
         Identifier column names to check.
+    strip_salts : bool
+        Whether a shared salt-stripped parent counts as the same compound.
 
     Returns
     -------
@@ -379,24 +386,29 @@ def identifier_namespace_issues(
     result: dict[str, NamespaceIssues] = {}
     for col in identifier_columns:
         by_id: dict[str, list[MoleculeRecord]] = defaultdict(list)
-        by_structure: dict[tuple[str | None, str | None], list[MoleculeRecord]] = defaultdict(list)
+        by_compound: dict[str, list[MoleculeRecord]] = defaultdict(list)
         for r in all_records:
             id_value = r.identifiers.get(col)
             if id_value is None or not r.is_parsed:
                 continue
             by_id[id_value].append(r)
-            by_structure[(r.canonical_smiles, r.inchikey)].append(r)
+            compound = _compound_key(r, strip_salts)
+            if compound is not None:
+                by_compound[compound].append(r)
 
         one_id_multiple_structures: list[OneIdMultipleStructures] = [
-            {"identifier": id_value, "structures": _structures(recs)}
+            {
+                "identifier": id_value,
+                "conflict_type": _id_conflict_type(recs, strip_salts),
+                "max_similarity": _max_similarity(recs),
+                "structures": _structures(recs),
+            }
             for id_value, recs in sorted(by_id.items())
             if len({(r.canonical_smiles, r.inchikey) for r in recs}) > 1
         ]
 
         one_structure_multiple_ids: list[OneStructureMultipleIds] = []
-        for (cs, ik), recs in sorted(
-            by_structure.items(), key=lambda kv: (kv[0][0] or "", kv[0][1] or "")
-        ):
+        for _, recs in sorted(by_compound.items()):
             id_values = {r.identifiers.get(col) for r in recs}
             if len(id_values) > 1:
                 identifier_entries: list[IdentifierOccurrences] = [
@@ -409,7 +421,12 @@ def identifier_namespace_issues(
                     for id_value in sorted(v for v in id_values if v is not None)
                 ]
                 one_structure_multiple_ids.append(
-                    {"canonical_smiles": cs, "inchikey": ik, "identifiers": identifier_entries}
+                    {
+                        "conflict_type": _shared_structure_type(recs, strip_salts),
+                        "canonical_smiles": recs[0].canonical_smiles,
+                        "inchikey": recs[0].inchikey,
+                        "identifiers": identifier_entries,
+                    }
                 )
 
         result[col] = {
@@ -420,6 +437,177 @@ def identifier_namespace_issues(
             **_unparsed_rows_by_identifier(all_records, col, by_id),
         }
     return result
+
+
+def _salt_level_key(record: MoleculeRecord, strip_salts: bool) -> str | None:
+    """The InChIKey a record is compared on, salt form ignored if ``strip_salts``.
+
+    Parameters
+    ----------
+    record : MoleculeRecord
+        A parsed record.
+    strip_salts : bool
+        Whether to use the salt-stripped parent's InChIKey.
+
+    Returns
+    -------
+    str | None
+        The parent InChIKey (``strip_salts``, falling back to the record's
+        own if no parent was computed) or the record's own.
+    """
+    if strip_salts and record.parent_inchikey is not None:
+        return record.parent_inchikey
+    return record.inchikey
+
+
+def _compound_key(record: MoleculeRecord, strip_salts: bool) -> str | None:
+    """Group records that are the same compound, ignoring salt form and stereo.
+
+    Parameters
+    ----------
+    record : MoleculeRecord
+        A parsed record.
+    strip_salts : bool
+        Whether to ignore salt form (use the parent compound).
+
+    Returns
+    -------
+    str | None
+        The connectivity block of the (parent) InChIKey.
+    """
+    key = _salt_level_key(record, strip_salts)
+    return key.split("-", 1)[0] if key else None
+
+
+_TAUTOMER_ENUMERATOR = rdMolStandardize.TautomerEnumerator()
+
+
+def _tautomer_key(record: MoleculeRecord, strip_salts: bool) -> str | None:
+    """The connectivity of a record's tautomer-canonical (parent) structure.
+
+    Only computed for records involved in an identifier conflict, so the
+    tautomer canonicalisation cost stays small.
+
+    Parameters
+    ----------
+    record : MoleculeRecord
+        A parsed record.
+    strip_salts : bool
+        Whether to canonicalise the salt-stripped parent rather than the
+        structure as drawn.
+
+    Returns
+    -------
+    str | None
+        The InChIKey connectivity block of the tautomer-canonicalised
+        structure, or ``None`` if it can't be computed.
+    """
+    smiles = record.parent_smiles if strip_salts and record.parent_smiles else None
+    mol = Chem.MolFromSmiles(smiles or record.canonical_smiles or "")
+    if mol is None:
+        return None
+    key = Chem.MolToInchiKey(_TAUTOMER_ENUMERATOR.Canonicalize(mol))
+    return key.split("-", 1)[0] if key else None
+
+
+def _all_equal(values: Iterable[str | None]) -> bool:
+    """Whether every value is the same and not ``None``.
+
+    Parameters
+    ----------
+    values : Iterable[str | None]
+        The values to compare.
+
+    Returns
+    -------
+    bool
+        ``True`` if there is exactly one distinct value and it isn't
+        ``None``.
+    """
+    distinct = set(values)
+    return len(distinct) == 1 and None not in distinct
+
+
+def _id_conflict_type(records: list[MoleculeRecord], strip_salts: bool) -> IdConflictType:
+    """Classify how the structures given one identifier differ.
+
+    Uses the finest comparison under which all of them are the same:
+    identical InChIKey (only the drawing differs, e.g. a mobile-H tautomer)
+    or tautomer-canonical parent -> ``tautomer``; same salt-stripped parent
+    -> ``salt_form``; same parent connectivity -> ``stereo`` (salt form may
+    differ too); otherwise ``different_compound``.
+
+    Parameters
+    ----------
+    records : list[MoleculeRecord]
+        The parsed records sharing the identifier.
+    strip_salts : bool
+        Whether salt-form differences can be recognised.
+
+    Returns
+    -------
+    IdConflictType
+        The kind of conflict.
+    """
+    if _all_equal(r.inchikey for r in records):
+        return "tautomer"
+    if strip_salts and _all_equal(r.parent_inchikey for r in records):
+        return "salt_form"
+    if _all_equal(_compound_key(r, strip_salts) for r in records):
+        return "stereo"
+    if _all_equal(_tautomer_key(r, strip_salts) for r in records):
+        return "tautomer"
+    return "different_compound"
+
+
+def _shared_structure_type(records: list[MoleculeRecord], strip_salts: bool) -> SharedStructureType:
+    """Classify how the structures of one compound given several identifiers relate.
+
+    Parameters
+    ----------
+    records : list[MoleculeRecord]
+        Parsed records sharing a compound key (see ``_compound_key``).
+    strip_salts : bool
+        Whether salt-form differences can be recognised.
+
+    Returns
+    -------
+    SharedStructureType
+        ``same_structure`` if they're all identical, ``salt_form`` if they
+        share a parent, otherwise ``stereo``.
+    """
+    if _all_equal(f"{r.canonical_smiles}|{r.inchikey}" for r in records):
+        return "same_structure"
+    if strip_salts and _all_equal(r.parent_inchikey for r in records):
+        return "salt_form"
+    return "stereo"
+
+
+def _max_similarity(records: list[MoleculeRecord]) -> float | None:
+    """Highest Tanimoto similarity between the distinct structures among records.
+
+    Parameters
+    ----------
+    records : list[MoleculeRecord]
+        Parsed records.
+
+    Returns
+    -------
+    float | None
+        The maximum pairwise similarity between one representative of each
+        distinct structure, or ``None`` if fewer than two have
+        fingerprints.
+    """
+    representatives: dict[tuple[str | None, str | None], Fingerprint] = {}
+    for r in records:
+        if r.fingerprint is not None:
+            representatives.setdefault((r.canonical_smiles, r.inchikey), r.fingerprint)
+    fps = list(representatives.values())
+    if len(fps) < 2:
+        return None
+    return max(
+        max(DataStructs.BulkTanimotoSimilarity(fp, fps[i + 1 :])) for i, fp in enumerate(fps[:-1])
+    )
 
 
 def _structures(records: list[MoleculeRecord]) -> list[StructureOccurrences]:

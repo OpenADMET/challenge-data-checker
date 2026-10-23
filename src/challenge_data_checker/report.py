@@ -236,7 +236,7 @@ def build_report(
     )
     train_dupes = internal_duplicates(train_records, identifier_columns, strip_salts)
     test_dupes = internal_duplicates(test_records, identifier_columns, strip_salts)
-    namespace_issues = identifier_namespace_issues(all_records, identifier_columns)
+    namespace_issues = identifier_namespace_issues(all_records, identifier_columns, strip_salts)
     _mark_resolvable_rows(unparseable, namespace_issues)
     quality_train = quality_flag_entries(train_records)
     quality_test = quality_flag_entries(test_records)
@@ -291,6 +291,13 @@ def build_report(
         "total_identifier_namespace_issues": {
             col: {
                 "one_id_multiple_structures": len(issues["one_id_multiple_structures"]),
+                "one_id_multiple_structures_by_type": dict(
+                    sorted(
+                        Counter(
+                            c["conflict_type"] for c in issues["one_id_multiple_structures"]
+                        ).items()
+                    )
+                ),
                 "one_structure_multiple_ids": len(issues["one_structure_multiple_ids"]),
                 "identifier_whitespace": len(issues["identifier_whitespace"]),
                 "near_duplicates": len(issues["near_duplicates"]),
@@ -773,10 +780,9 @@ type _NamespaceCountKey = Literal[
     "identifier_whitespace",
 ]
 
-# Rows of the dashboard's identifier table: label, NamespaceIssueCounts key,
-# and finding type (for its tier).
+# Rows of the dashboard's identifier table after the two "1 id -> ..." rows:
+# label, NamespaceIssueCounts key, and finding type (for its tier).
 _NAMESPACE_TABLE_ROWS: tuple[tuple[str, _NamespaceCountKey, str], ...] = (
-    ("1 id -> many structures", "one_id_multiple_structures", "one_id_multiple_structures"),
     ("1 structure -> many ids", "one_structure_multiple_ids", "one_structure_multiple_ids"),
     (
         "id with broken + valid SMILES",
@@ -814,6 +820,28 @@ def _namespace_table(s: Summary, context: TierContext) -> Table | None:
     if not columns:
         return None
     table = _new_table(["Check", *columns])
+    different = [
+        c["one_id_multiple_structures_by_type"].get("different_compound", 0)
+        for c in columns.values()
+    ]
+    variants = [
+        c["one_id_multiple_structures"] - d
+        for c, d in zip(columns.values(), different, strict=True)
+    ]
+    table.add_row(
+        "1 id -> different compounds",
+        *(
+            _status_cell(n, severity_of("one_id_multiple_structures", None, context))
+            for n in different
+        ),
+    )
+    table.add_row(
+        "1 id -> salt/stereo/tautomer variants",
+        *(
+            _status_cell(n, severity_of("one_id_structure_variants", None, context))
+            for n in variants
+        ),
+    )
     for label, count_key, finding_type in _NAMESPACE_TABLE_ROWS:
         severity = severity_of(finding_type, None, context)
         table.add_row(
@@ -1164,15 +1192,23 @@ def _identifier_namespace_lines(namespace_issues: dict[str, NamespaceIssues]) ->
     lines = []
     one_id_tag = _tag("one_id_multiple_structures", None, TierContext())
     one_structure_tag = _tag("one_structure_multiple_ids", None, TierContext())
+    variants_tag = _tag("one_id_structure_variants", None, TierContext())
     near_tag = _tag("identifier_near_duplicate", None, TierContext())
     whitespace_tag = _tag("identifier_whitespace", None, TierContext())
     broken_tag = _tag("id_with_unparseable_and_valid_structures", None, TierContext())
     missing_tag = _tag("missing_structure_resolvable_by_id", None, TierContext())
     for column, issues in namespace_issues.items():
         for finding in issues["one_id_multiple_structures"]:
+            conflict = finding["conflict_type"]
+            tag = one_id_tag if conflict == "different_compound" else variants_tag
+            similarity = (
+                f", max Tanimoto {finding['max_similarity']:.2f}"
+                if finding["max_similarity"] is not None
+                else ""
+            )
             lines.append(
-                f"  {one_id_tag} {column}: identifier {finding['identifier']!r} "
-                "-> multiple structures"
+                f"  {tag} {column}: identifier {finding['identifier']!r} "
+                f"-> multiple structures ({conflict}{similarity})"
             )
             for structure in finding["structures"]:
                 lines.append(
@@ -1184,7 +1220,8 @@ def _identifier_namespace_lines(namespace_issues: dict[str, NamespaceIssues]) ->
             lines.append(
                 f"  {one_structure_tag} {column}: structure "
                 f"(canonical_smiles={ids_finding['canonical_smiles']!r}, "
-                f"inchikey={ids_finding['inchikey']!r}) -> multiple identifiers"
+                f"inchikey={ids_finding['inchikey']!r}) -> multiple identifiers "
+                f"({ids_finding['conflict_type']})"
             )
             for identifier in ids_finding["identifiers"]:
                 lines.append(f"    identifier={identifier['identifier']!r}")

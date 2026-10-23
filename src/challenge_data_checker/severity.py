@@ -90,7 +90,8 @@ TIERS: dict[str, TierRule] = {
     "duplicate_identifier": _TRAIN_WARN_TEST_FAIL,
     "duplicate_stereoisomer": Severity.WARN,
     # Identifier namespace
-    "one_id_multiple_structures": Severity.FAIL,
+    "one_id_multiple_structures": Severity.FAIL,  # different compounds
+    "one_id_structure_variants": Severity.WARN,  # salt form, stereo or tautomer
     "one_structure_multiple_ids": Severity.WARN,
     "identifier_whitespace": Severity.WARN,
     "identifier_near_duplicate": Severity.WARN,
@@ -327,7 +328,12 @@ def collect_findings(
                 for structure in conflict["structures"]
                 for loc in structure["occurrences"]
             )
-            yield Finding("one_id_multiple_structures", None, rows)
+            conflict_finding = (
+                "one_id_multiple_structures"
+                if conflict["conflict_type"] == "different_compound"
+                else "one_id_structure_variants"
+            )
+            yield Finding(conflict_finding, None, rows)
         for id_conflict in issues["one_structure_multiple_ids"]:
             rows = frozenset(
                 _row_key(loc)
