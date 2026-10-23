@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from challenge_data_checker.chemistry import MoleculeProcessor
 from challenge_data_checker.config import ColumnsConfig, Config, PathsConfig, SettingsConfig
 from challenge_data_checker.models import MoleculeRecord
 from challenge_data_checker.report import (
@@ -238,3 +239,30 @@ def test_print_summary_runs_without_error(tmp_path, capsys):
     assert "challenge-data-checker audit summary" in captured.out
     assert "Rows processed" in captured.out
     assert report["generated_at"] in captured.out
+
+
+def test_build_report_counts_stereo_only_overlap_separately(tmp_path):
+    # Train has L-alanine; test has L-alanine (exact) and the racemate
+    # (same connectivity, different stereo): one exact and one stereo-only
+    # test row, and the train row only counts as exact.
+    processor = MoleculeProcessor(SettingsConfig())
+    train = [processor.process_row("train", "train.csv", 0, "C[C@H](N)C(=O)O", {})]
+    test = [
+        processor.process_row("test", "test.csv", 0, "C[C@H](N)C(=O)O", {}),
+        processor.process_row("test", "test.csv", 1, "CC(N)C(=O)O", {}),
+    ]
+
+    report = build_report(make_config(tmp_path), train, test, [])
+
+    s = report["summary"]
+    assert (s["total_exact_leaked_train_molecules"], s["total_exact_leaked_test_molecules"]) == (
+        1,
+        1,
+    )
+    assert (s["total_stereo_leaked_train_molecules"], s["total_stereo_leaked_test_molecules"]) == (
+        0,
+        1,
+    )
+    text = format_report_as_text(report)
+    stereo_section = text.split("Same Connectivity, Different Stereochemistry")[1]
+    assert "'CC(N)C(=O)O'" in stereo_section.split("Tanimoto")[0]

@@ -7,10 +7,24 @@ renders it. They add no runtime behaviour.
 
 from typing import Literal, TypedDict
 
-# Chemical representations compared by the exact-match leakage and
-# duplicate checks (see ``checks._representation_key_funcs``).
-type Representation = Literal["raw_smiles", "canonical_smiles", "inchikey"]
-REPRESENTATIONS: tuple[Representation, ...] = ("raw_smiles", "canonical_smiles", "inchikey")
+# Chemical representations compared by the leakage and duplicate checks (see
+# ``checks._representation_key_funcs``). All but the stereo-insensitive ones
+# are exact: a match means the same structure, stereochemistry included.
+type Representation = Literal["raw_smiles", "canonical_smiles", "inchikey", "inchikey_connectivity"]
+REPRESENTATIONS: tuple[Representation, ...] = (
+    "raw_smiles",
+    "canonical_smiles",
+    "inchikey",
+    "inchikey_connectivity",
+)
+# Representations that ignore stereochemistry: the first (connectivity)
+# block of the InChIKey. A match groups stereoisomers and racemate /
+# enantiomer pairs, and is only reported when the members don't all share
+# one full InChIKey (otherwise it would just repeat an exact match).
+STEREO_INSENSITIVE_REPRESENTATIONS: frozenset[Representation] = frozenset({"inchikey_connectivity"})
+EXACT_REPRESENTATIONS: tuple[Representation, ...] = tuple(
+    r for r in REPRESENTATIONS if r not in STEREO_INSENSITIVE_REPRESENTATIONS
+)
 
 # Per-pool quality-filter categories (see ``report.quality_flag_entries``).
 type QualityFlagCategory = Literal["mixtures", "salts_or_metal_complexes", "suspicious_fragments"]
@@ -80,6 +94,7 @@ class InternalDuplicates(TypedDict):
     raw_smiles: list[DuplicateFinding]
     canonical_smiles: list[DuplicateFinding]
     inchikey: list[DuplicateFinding]
+    inchikey_connectivity: list[DuplicateFinding]
     identifiers: dict[str, list[DuplicateFinding]]
 
 
@@ -145,6 +160,8 @@ class Summary(TypedDict):
     total_unparseable_test: int
     total_exact_leaked_train_molecules: int
     total_exact_leaked_test_molecules: int
+    total_stereo_leaked_train_molecules: int
+    total_stereo_leaked_test_molecules: int
     total_identifier_leakage_events: int
     total_tanimoto_leakage_pairs: int
     total_internal_duplicates_train: dict[str, int]

@@ -1,7 +1,7 @@
 """Assembling the audit report (JSON or text) and the stdout summary dashboard."""
 
 import json
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
@@ -23,8 +23,10 @@ from challenge_data_checker.config import Config
 from challenge_data_checker.io_utils import describe_source
 from challenge_data_checker.models import MoleculeRecord
 from challenge_data_checker.report_types import (
+    EXACT_REPRESENTATIONS,
     QUALITY_FLAG_CATEGORIES,
     REPRESENTATIONS,
+    STEREO_INSENSITIVE_REPRESENTATIONS,
     InternalDuplicates,
     LeakageFinding,
     Location,
@@ -63,10 +65,41 @@ def quality_flag_entries(records: list[MoleculeRecord]) -> QualityFlags:
     }
 
 
-def _unique_leaked_locations(
+def _leaked_rows(
+    exact_leakage: dict[str, list[LeakageFinding]],
+    side: Literal["train", "test"],
+    representations: Iterable[str],
+) -> set[tuple[str, str, int]]:
+    """Collect the distinct rows involved in leakage findings on one side.
+
+    Parameters
+    ----------
+    exact_leakage : dict[str, list[LeakageFinding]]
+        The result of ``checks.train_test_leakage``.
+    side : Literal["train", "test"]
+        Which side to collect, ``"train"`` or ``"test"``.
+    representations : Iterable[str]
+        Which representations' findings to include.
+
+    Returns
+    -------
+    set[tuple[str, str, int]]
+        The distinct (pool, source_file, row_index) rows appearing as a
+        ``{side}_occurrences`` entry under any of ``representations``.
+    """
+    seen = set()
+    for name in representations:
+        for entry in exact_leakage.get(name, []):
+            occurrences = entry["train_occurrences" if side == "train" else "test_occurrences"]
+            for occ in occurrences:
+                seen.add((occ["pool"], occ["source_file"], occ["row_index"]))
+    return seen
+
+
+def _leaked_counts(
     exact_leakage: dict[str, list[LeakageFinding]], side: Literal["train", "test"]
-) -> int:
-    """Count the distinct rows involved in exact leakage findings on one side.
+) -> tuple[int, int]:
+    """Count rows in exact leakage, and rows whose only overlap is stereo-insensitive.
 
     Parameters
     ----------
@@ -78,17 +111,16 @@ def _unique_leaked_locations(
     Returns
     -------
     int
-        The number of distinct (pool, source_file, row_index) rows
-        appearing as a ``{side}_occurrences`` entry across all
-        representations.
+        Distinct rows in an exact (raw SMILES, canonical SMILES or
+        InChIKey) match.
+    int
+        Distinct rows in a stereo-insensitive (connectivity) match but
+        no exact match, e.g. one enantiomer of a racemate in the other
+        pool.
     """
-    seen = set()
-    for entries in exact_leakage.values():
-        for entry in entries:
-            occurrences = entry["train_occurrences" if side == "train" else "test_occurrences"]
-            for occ in occurrences:
-                seen.add((occ["pool"], occ["source_file"], occ["row_index"]))
-    return len(seen)
+    exact = _leaked_rows(exact_leakage, side, EXACT_REPRESENTATIONS)
+    stereo = _leaked_rows(exact_leakage, side, STEREO_INSENSITIVE_REPRESENTATIONS)
+    return len(exact), len(stereo - exact)
 
 
 def build_report(
@@ -139,14 +171,18 @@ def build_report(
     quality_train = quality_flag_entries(train_records)
     quality_test = quality_flag_entries(test_records)
 
+    exact_train, stereo_train = _leaked_counts(exact_leakage, "train")
+    exact_test, stereo_test = _leaked_counts(exact_leakage, "test")
     summary: Summary = {
         "total_train_rows": len(train_records),
         "total_test_rows": len(test_records),
         "total_unparseable": len(unparseable),
         "total_unparseable_train": sum(1 for r in train_records if not r.is_parsed),
         "total_unparseable_test": sum(1 for r in test_records if not r.is_parsed),
-        "total_exact_leaked_train_molecules": _unique_leaked_locations(exact_leakage, "train"),
-        "total_exact_leaked_test_molecules": _unique_leaked_locations(exact_leakage, "test"),
+        "total_exact_leaked_train_molecules": exact_train,
+        "total_exact_leaked_test_molecules": exact_test,
+        "total_stereo_leaked_train_molecules": stereo_train,
+        "total_stereo_leaked_test_molecules": stereo_test,
         "total_identifier_leakage_events": sum(len(v) for v in id_leakage.values()),
         "total_tanimoto_leakage_pairs": len(tanimoto),
         "total_internal_duplicates_train": {
@@ -291,6 +327,14 @@ def _build_summary_lines(report: Report) -> list[str]:
         (
             f"  Test compounds in train/test overlap (raw/canonical/InChIKey) : "
             f"{s['total_exact_leaked_test_molecules']}"
+        ),
+        (
+            f"  Train compounds in stereo-only overlap (same connectivity)    : "
+            f"{s['total_stereo_leaked_train_molecules']}"
+        ),
+        (
+            f"  Test compounds in stereo-only overlap (same connectivity)     : "
+            f"{s['total_stereo_leaked_test_molecules']}"
         ),
         (
             f"  Identifier overlap events                                     : "
@@ -440,6 +484,14 @@ def _leakage_table(s: Summary) -> Table:
         "Test compounds in train/test overlap",
         _status_cell(s["total_exact_leaked_test_molecules"]),
     )
+    table.add_row(
+        "Train compounds in stereo-only overlap",
+        _status_cell(s["total_stereo_leaked_train_molecules"]),
+    )
+    table.add_row(
+        "Test compounds in stereo-only overlap",
+        _status_cell(s["total_stereo_leaked_test_molecules"]),
+    )
     table.add_row("Identifier overlap events", _status_cell(s["total_identifier_leakage_events"]))
     table.add_row(
         "Tanimoto similarity flags (>= threshold)",
@@ -554,6 +606,8 @@ def _total_issue_count(s: Summary) -> int:
         s["total_unparseable"]
         + s["total_exact_leaked_train_molecules"]
         + s["total_exact_leaked_test_molecules"]
+        + s["total_stereo_leaked_train_molecules"]
+        + s["total_stereo_leaked_test_molecules"]
         + s["total_identifier_leakage_events"]
         + s["total_tanimoto_leakage_pairs"]
         + sum(s["total_internal_duplicates_train"].values())
@@ -691,13 +745,17 @@ def _section(title: str, body_lines: list[str]) -> list[str]:
     return lines
 
 
-def _exact_leakage_lines(exact_leakage: dict[str, list[LeakageFinding]]) -> list[str]:
-    """Render exact train/test leakage findings (raw/canonical SMILES, InChIKey).
+def _exact_leakage_lines(
+    exact_leakage: dict[str, list[LeakageFinding]], representations: Iterable[str]
+) -> list[str]:
+    """Render train/test leakage findings for the given representations.
 
     Parameters
     ----------
     exact_leakage : dict[str, list[LeakageFinding]]
         The result of ``checks.train_test_leakage``.
+    representations : Iterable[str]
+        Which representations' findings to render, in order.
 
     Returns
     -------
@@ -705,8 +763,8 @@ def _exact_leakage_lines(exact_leakage: dict[str, list[LeakageFinding]]) -> list
         One block of lines per representation with a leaked value.
     """
     lines = []
-    for representation, findings in exact_leakage.items():
-        for finding in findings:
+    for representation in representations:
+        for finding in exact_leakage.get(representation, []):
             lines.append(f"  {representation} = {finding['value']!r}")
             lines.extend(_fmt_locations(finding["train_occurrences"]))
             lines.extend(_fmt_locations(finding["test_occurrences"]))
@@ -890,7 +948,16 @@ def format_report_as_text(report: Report) -> str:
     lines.extend(
         _section(
             "Train-Test Leakage: Exact Matches",
-            _exact_leakage_lines(report["train_test_leakage"]["exact"]),
+            _exact_leakage_lines(report["train_test_leakage"]["exact"], EXACT_REPRESENTATIONS),
+        )
+    )
+    lines.extend(
+        _section(
+            "Train-Test Leakage: Same Connectivity, Different Stereochemistry",
+            _exact_leakage_lines(
+                report["train_test_leakage"]["exact"],
+                sorted(STEREO_INSENSITIVE_REPRESENTATIONS),
+            ),
         )
     )
     lines.extend(

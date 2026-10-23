@@ -10,6 +10,8 @@ from challenge_data_checker.checks import (
     train_test_leakage,
     unparseable_entries,
 )
+from challenge_data_checker.chemistry import MoleculeProcessor
+from challenge_data_checker.config import SettingsConfig
 from challenge_data_checker.models import MoleculeRecord
 
 _FP_GEN = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048, includeChirality=False)
@@ -156,9 +158,9 @@ def test_tanimoto_leakage_excludes_exact_inchikey_matches():
     assert result == []  # already covered by exact InChIKey leakage, not double-reported
 
 
-def test_tanimoto_leakage_catches_stereo_mismatch_at_default_threshold():
-    # Same flat structure, different stereo descriptor -> different InChIKey,
-    # identical stereo-blind fingerprint.
+def test_tanimoto_leakage_still_flags_identical_fingerprints_with_different_connectivity():
+    # A fingerprint collision between structurally different molecules (here
+    # simulated with unrelated InChIKeys) is still reported by the Tanimoto check.
     r_ala = fp("C[C@H](N)C(=O)O")
     s_ala = fp("C[C@@H](N)C(=O)O")
     train = [
@@ -200,3 +202,56 @@ def test_tanimoto_leakage_does_not_warn_for_small_pools(caplog):
     with caplog.at_level("WARNING", logger="challenge_data_checker.checks"):
         tanimoto_leakage(train, test, threshold=1.0)
     assert caplog.text == ""
+
+
+_PROCESSOR = MoleculeProcessor(SettingsConfig())
+
+RACEMIC_ALA = "CC(N)C(=O)O"
+L_ALA = "C[C@H](N)C(=O)O"
+D_ALA = "C[C@@H](N)C(=O)O"
+
+
+def processed(pool, row_index, smiles):
+    return _PROCESSOR.process_row(pool, f"{pool}.csv", row_index, smiles, {})
+
+
+def test_internal_duplicates_flags_racemate_and_enantiomer_in_one_pool():
+    records = [processed("train", 0, RACEMIC_ALA), processed("train", 1, L_ALA)]
+    dupes = internal_duplicates(records, [])
+    assert dupes["inchikey"] == []
+    assert len(dupes["inchikey_connectivity"]) == 1
+    assert [o["row_index"] for o in dupes["inchikey_connectivity"][0]["occurrences"]] == [0, 1]
+
+
+def test_internal_duplicates_connectivity_does_not_repeat_exact_duplicates():
+    records = [processed("train", 0, L_ALA), processed("train", 1, L_ALA)]
+    dupes = internal_duplicates(records, [])
+    assert len(dupes["inchikey"]) == 1
+    assert dupes["inchikey_connectivity"] == []
+
+
+def test_train_test_leakage_reports_enantiomer_pair_as_connectivity_match():
+    train = [processed("train", 0, L_ALA)]
+    test = [processed("test", 0, D_ALA)]
+    leakage = train_test_leakage(train, test)
+    assert leakage["inchikey"] == []
+    assert len(leakage["inchikey_connectivity"]) == 1
+    # Not double-reported by the stereo-blind Tanimoto fallback.
+    assert tanimoto_leakage(train, test, threshold=1.0) == []
+
+
+def test_train_test_leakage_connectivity_does_not_repeat_exact_match():
+    train = [processed("train", 0, L_ALA)]
+    test = [processed("test", 0, L_ALA)]
+    leakage = train_test_leakage(train, test)
+    assert len(leakage["inchikey"]) == 1
+    assert leakage["inchikey_connectivity"] == []
+
+
+def test_train_test_leakage_connectivity_reports_extra_stereoisomer_alongside_exact_match():
+    train = [processed("train", 0, L_ALA)]
+    test = [processed("test", 0, L_ALA), processed("test", 1, RACEMIC_ALA)]
+    leakage = train_test_leakage(train, test)
+    assert len(leakage["inchikey"]) == 1
+    (finding,) = leakage["inchikey_connectivity"]
+    assert [o["row_index"] for o in finding["test_occurrences"]] == [0, 1]

@@ -8,6 +8,7 @@ from rdkit import DataStructs
 
 from challenge_data_checker.models import MoleculeRecord
 from challenge_data_checker.report_types import (
+    STEREO_INSENSITIVE_REPRESENTATIONS,
     DuplicateFinding,
     IdentifierOccurrences,
     InternalDuplicates,
@@ -77,14 +78,58 @@ def _representation_key_funcs() -> dict[Representation, KeyFunc]:
     -------
     dict[Representation, KeyFunc]
         A mapping of representation name (``raw_smiles``,
-        ``canonical_smiles``, ``inchikey``) to a function extracting that
-        representation's value from a record.
+        ``canonical_smiles``, ``inchikey``, ``inchikey_connectivity``) to
+        a function extracting that representation's value from a record.
     """
     return {
         "raw_smiles": lambda r: r.raw_smiles if r.raw_smiles else None,
         "canonical_smiles": lambda r: r.canonical_smiles,
         "inchikey": lambda r: r.inchikey,
+        "inchikey_connectivity": _connectivity_key,
     }
+
+
+def _connectivity_key(record: MoleculeRecord) -> str | None:
+    """Extract the first (connectivity) block of a record's InChIKey.
+
+    Parameters
+    ----------
+    record : MoleculeRecord
+        The record to extract the key from.
+
+    Returns
+    -------
+    str | None
+        The 14-character connectivity block, which ignores
+        stereochemistry, or ``None`` if the record has no InChIKey.
+    """
+    if record.inchikey is None:
+        return None
+    return record.inchikey.split("-", 1)[0]
+
+
+def _is_reportable(name: Representation, records: list[MoleculeRecord]) -> bool:
+    """Decide whether a group of records sharing a representation is worth reporting.
+
+    Exact representations always are. A stereo-insensitive group is only
+    reported when its records don't all share one full InChIKey; otherwise
+    it would just repeat the exact InChIKey match.
+
+    Parameters
+    ----------
+    name : Representation
+        The representation the records were grouped by.
+    records : list[MoleculeRecord]
+        The records sharing that representation's value.
+
+    Returns
+    -------
+    bool
+        Whether the group should be reported under ``name``.
+    """
+    if name not in STEREO_INSENSITIVE_REPRESENTATIONS:
+        return True
+    return len({r.inchikey for r in records}) > 1
 
 
 def _identifier_key_func(col: str) -> KeyFunc:
@@ -110,7 +155,12 @@ def _identifier_key_func(col: str) -> KeyFunc:
 def train_test_leakage(
     train_records: list[MoleculeRecord], test_records: list[MoleculeRecord]
 ) -> dict[str, list[LeakageFinding]]:
-    """Find raw SMILES / canonical SMILES / InChIKey values present in both pools.
+    """Find structures present in both pools, per representation.
+
+    Exact representations (raw SMILES, canonical SMILES, InChIKey) report
+    every shared value. The stereo-insensitive ``inchikey_connectivity``
+    only reports values whose train and test records don't all share one
+    full InChIKey, i.e. stereoisomers and racemate / enantiomer pairs.
 
     Parameters
     ----------
@@ -137,6 +187,7 @@ def train_test_leakage(
                 "test_occurrences": [r.location() for r in test_index[value]],
             }
             for value in shared
+            if _is_reportable(name, train_index[value] + test_index[value])
         ]
     return result
 
@@ -181,7 +232,11 @@ def identifier_leakage(
     return result
 
 
-def _duplicates_by(records: list[MoleculeRecord], key_func: KeyFunc) -> list[DuplicateFinding]:
+def _duplicates_by(
+    records: list[MoleculeRecord],
+    key_func: KeyFunc,
+    representation: Representation | None = None,
+) -> list[DuplicateFinding]:
     """Find key values shared by more than one record.
 
     Parameters
@@ -191,6 +246,11 @@ def _duplicates_by(records: list[MoleculeRecord], key_func: KeyFunc) -> list[Dup
     key_func : KeyFunc
         A function mapping a record to the value to compare, or ``None``
         to exclude the record.
+    representation : Representation | None
+        The chemical representation ``key_func`` extracts, used to skip
+        stereo-insensitive groups that only repeat an exact match (see
+        ``_is_reportable``), or ``None`` for a non-chemical key such as
+        an identifier column.
 
     Returns
     -------
@@ -202,7 +262,7 @@ def _duplicates_by(records: list[MoleculeRecord], key_func: KeyFunc) -> list[Dup
     return [
         {"value": value, "occurrences": [r.location() for r in occs]}
         for value, occs in sorted(index.items())
-        if len(occs) > 1
+        if len(occs) > 1 and (representation is None or _is_reportable(representation, occs))
     ]
 
 
@@ -222,16 +282,21 @@ def internal_duplicates(
     -------
     InternalDuplicates
         A mapping with one entry per representation (``raw_smiles``,
-        ``canonical_smiles``, ``inchikey``) plus an ``"identifiers"``
-        entry mapping each identifier column to its own duplicate
+        ``canonical_smiles``, ``inchikey``, ``inchikey_connectivity``) plus
+        an ``"identifiers"`` entry mapping each identifier column to its own duplicate
         findings. Each finding lists the duplicated value and all of its
         occurrences.
     """
     key_funcs = _representation_key_funcs()
+
+    def dupes(name: Representation) -> list[DuplicateFinding]:
+        return _duplicates_by(records, key_funcs[name], name)
+
     return {
-        "raw_smiles": _duplicates_by(records, key_funcs["raw_smiles"]),
-        "canonical_smiles": _duplicates_by(records, key_funcs["canonical_smiles"]),
-        "inchikey": _duplicates_by(records, key_funcs["inchikey"]),
+        "raw_smiles": dupes("raw_smiles"),
+        "canonical_smiles": dupes("canonical_smiles"),
+        "inchikey": dupes("inchikey"),
+        "inchikey_connectivity": dupes("inchikey_connectivity"),
         "identifiers": {
             col: _duplicates_by(records, _identifier_key_func(col)) for col in identifier_columns
         },
@@ -330,9 +395,10 @@ def tanimoto_leakage(
     """Compute bulk pairwise Tanimoto similarity between train and test fingerprints.
 
     Flags pairs with similarity >= threshold as possible data leakage,
-    excluding pairs that already share an InChIKey (those are reported as
-    exact leakage elsewhere). Uses RDKit's ``BulkTanimotoSimilarity`` to avoid
-    nested Python loops.
+    excluding pairs that share an InChIKey connectivity block: those are
+    already reported by ``train_test_leakage``, as an exact InChIKey match
+    or, if only the stereochemistry differs, a connectivity match. Uses
+    RDKit's ``BulkTanimotoSimilarity`` to avoid nested Python loops.
 
     Parameters
     ----------
@@ -371,8 +437,9 @@ def tanimoto_leakage(
         for test_rec, similarity in zip(test_valid, similarities, strict=True):
             if similarity < threshold:
                 continue
-            if train_rec.inchikey is not None and train_rec.inchikey == test_rec.inchikey:
-                continue  # already reported as exact InChIKey leakage
+            train_connectivity = _connectivity_key(train_rec)
+            if train_connectivity is not None and train_connectivity == _connectivity_key(test_rec):
+                continue  # already reported by train_test_leakage
             findings.append(
                 {
                     "train": train_rec.location(),

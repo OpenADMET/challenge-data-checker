@@ -18,12 +18,17 @@ issues. Built for sequential processing of datasets up to ~10,000 molecules.
 - Parses every SMILES with RDKit, with optional tautomer standardisation, and
   computes canonical SMILES, InChIKey, and a stereo-blind Morgan fingerprint.
 - **Train-test leakage**: exact matches on raw SMILES, canonical SMILES,
-  InChIKey, or any configured identifier column.
+  InChIKey, or any configured identifier column. Stereoisomers and
+  racemate/enantiomer pairs (same InChIKey connectivity block, different
+  stereo) are reported separately as stereo-only overlap.
 - **Tanimoto similarity fallback**: bulk pairwise Tanimoto comparison between
   every train/test fingerprint pair (via RDKit's `BulkTanimotoSimilarity`) to
-  catch near-duplicates and stereo-mismatches that slip past InChIKey.
+  catch near-duplicates. Pairs already reported as an exact or stereo-only
+  match are skipped.
 - **Internal duplicates**: repeated values within a single split (train-only
-  or test-only), per representation and per identifier column.
+  or test-only), per representation (including stereoisomers and
+  racemate/enantiomer pairs, via the InChIKey connectivity block) and per
+  identifier column.
 - **Identifier namespace checks**: flags an identifier that maps to more than
   one structure, or a structure that's given more than one identifier, within
   the same identifier column.

@@ -11,6 +11,17 @@ All notable changes to this project are recorded here. The format follows
 - Tab-separated input: `.tsv` files are now accepted alongside `.csv` and
   `.parquet`, as are gzip-compressed `.csv.gz` and `.tsv.gz`, locally or
   from a URL (#14).
+- Stereoisomer and racemate/enantiomer matching via the InChIKey
+  connectivity block (`inchikey_connectivity`), within a pool and across
+  pools (#10). A connectivity match is only reported when the rows don't
+  all share one full InChIKey, so it never repeats an exact match. The
+  report gains `internal_duplicates[pool]["inchikey_connectivity"]`,
+  `train_test_leakage["exact"]["inchikey_connectivity"]`, the summary counts
+  `total_stereo_leaked_train_molecules` / `total_stereo_leaked_test_molecules`
+  (rows whose only cross-pool match is stereo-insensitive), and a "Same
+  Connectivity, Different Stereochemistry" section in the text report. The
+  Tanimoto check now skips pairs that share a connectivity block, since
+  they're reported there.
 - New SMILES column aliases: `standardized_smiles`, `standardised_smiles`,
   `std_smiles`, `isomeric_smiles` and `cxsmiles` (#15, #7).
 - `py.typed` marker, so type checkers use the package's inline type hints.
