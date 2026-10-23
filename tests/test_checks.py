@@ -1,3 +1,4 @@
+import pytest
 from rdkit import Chem
 from rdkit.Chem import rdFingerprintGenerator
 
@@ -255,3 +256,43 @@ def test_train_test_leakage_connectivity_reports_extra_stereoisomer_alongside_ex
     assert len(leakage["inchikey"]) == 1
     (finding,) = leakage["inchikey_connectivity"]
     assert [o["row_index"] for o in finding["test_occurrences"]] == [0, 1]
+
+
+TEA = "CCN(CC)CC"
+
+
+@pytest.mark.parametrize("train_smiles", [f"{TEA}.Cl", "CC[NH+](CC)CC.[Cl-]"])
+def test_train_test_leakage_matches_salt_and_free_base(train_smiles):
+    train = [processed("train", 0, train_smiles)]
+    test = [processed("test", 0, TEA)]
+    leakage = train_test_leakage(train, test)
+    assert leakage["inchikey"] == []
+    assert len(leakage["parent_inchikey"]) == 1
+    # Not double-reported by the Tanimoto fallback.
+    assert tanimoto_leakage(train, test, threshold=0.0) == []
+
+
+def test_train_test_leakage_matches_two_different_salt_forms():
+    train = [processed("train", 0, f"{TEA}.Cl")]
+    test = [processed("test", 0, f"{TEA}.OC(=O)C(F)(F)F")]
+    assert len(train_test_leakage(train, test)["parent_inchikey"]) == 1
+
+
+def test_train_test_leakage_parent_key_off_without_strip_salts():
+    train = [processed("train", 0, f"{TEA}.Cl")]
+    test = [processed("test", 0, TEA)]
+    assert train_test_leakage(train, test, strip_salts=False)["parent_inchikey"] == []
+
+
+def test_train_test_leakage_parent_does_not_repeat_exact_match():
+    train = [processed("train", 0, f"{TEA}.Cl")]
+    test = [processed("test", 0, f"{TEA}.Cl")]
+    leakage = train_test_leakage(train, test)
+    assert len(leakage["inchikey"]) == 1
+    assert leakage["parent_inchikey"] == []
+
+
+def test_internal_duplicates_flags_salt_and_free_base_in_one_pool():
+    records = [processed("test", 0, f"{TEA}.Cl"), processed("test", 1, TEA)]
+    assert len(internal_duplicates(records, [])["parent_inchikey"]) == 1
+    assert internal_duplicates(records, [], strip_salts=False)["parent_inchikey"] == []

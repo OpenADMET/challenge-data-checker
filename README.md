@@ -98,6 +98,7 @@ identifier_columns = ["compound_id", "external_reg_no"]
 
 [settings]
 tautomer_standardisation = false     # default false
+strip_salts = true                   # default true (also compare salt-stripped parents)
 max_train_test_similarity = 1.0      # default 1.0 (Tanimoto threshold, inclusive)
 fp_radius = 2                        # default 2 (Morgan fingerprint radius)
 fp_n_bits = 2048                     # default 2048 (Morgan fingerprint bit length)
@@ -105,8 +106,8 @@ report_format = "json"               # default "json"; also accepts "txt"
 ```
 
 - `paths.train_files` / `paths.test_files`: one or more `.csv`, `.tsv`,
-  `.csv.gz`, `.tsv.gz` or `.parquet` files (local paths and/or URLs, freely mixed), pooled together into a
-  single training/test set respectively.
+  `.csv.gz`, `.tsv.gz` or `.parquet` files (local paths and/or URLs, freely
+  mixed), pooled together into a single training/test set respectively.
 - `columns.smiles_column`: resolved per file — exact match first, then
   case-insensitive, then an alias match. Aliases in order of preference:
   `smiles`, `canonical_smiles`, `standardized_smiles`, `standardised_smiles`,
@@ -118,9 +119,15 @@ report_format = "json"               # default "json"; also accepts "txt"
   different column than configured is being audited.
 - `columns.identifier_columns`: optional. A column missing from one file logs
   a warning and is simply skipped for that file's rows, without crashing.
+- `settings.strip_salts`: also compare each molecule's parent compound, with
+  known counterions and solvents stripped and charges neutralised, so a salt
+  in one pool matches its free base or another salt form in the other (e.g.
+  `CCN(CC)CC.Cl` in train and `CCN(CC)CC` in test). Matches are reported as
+  salt-form-only overlap and as `parent_inchikey` duplicates within a pool.
+  On by default; set `false` to compare only the structures as drawn.
 - `settings.max_train_test_similarity`: pairs with Tanimoto similarity **>=**
-  this threshold are flagged (excluding pairs already caught by exact
-  InChIKey matches, which are reported separately).
+  this threshold are flagged (excluding pairs already reported as an exact,
+  salt-form-only or stereo-only match).
 - `settings.report_format`: `"json"` for machine-readable output, or `"txt"`
   for a human-readable plain-text rendering of the same findings. If omitted,
   it's inferred from `report_output`'s extension — `.txt` implies `"txt"`,
@@ -179,7 +186,7 @@ report = audit(
 
 `report` is the same dict written to `report_output` by the CLI. All
 `[settings]` keys are available as keyword arguments (`smiles_column`,
-`identifier_columns`, `tautomer_standardisation`, `max_train_test_similarity`,
+`identifier_columns`, `tautomer_standardisation`, `strip_salts`, `max_train_test_similarity`,
 `fp_radius`, `fp_n_bits`). `report_output`/`report_format` work the same way
 as in the config file, except both are optional: omit `report_output` to skip
 writing a file entirely and only get the dict back. Pass `print_report=False`

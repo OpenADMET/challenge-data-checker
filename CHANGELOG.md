@@ -11,6 +11,19 @@ All notable changes to this project are recorded here. The format follows
 - Tab-separated input: `.tsv` files are now accepted alongside `.csv` and
   `.parquet`, as are gzip-compressed `.csv.gz` and `.tsv.gz`, locally or
   from a URL (#14).
+- Salt-form leakage: a new `strip_salts` setting (TOML, `audit()`; **on by
+  default**) compares each molecule's salt- and solvent-stripped,
+  neutralised parent compound, so a salt in one pool matches its free base
+  or another salt form in the other, e.g. `CCN(CC)CC.Cl` in train and
+  `CCN(CC)CC` in test (#5). Matches are reported under the new
+  `parent_inchikey` representation, across pools and within a pool. They
+  are only reported when the rows don't all share one full InChIKey, so
+  exact matches aren't repeated. Adds the summary counts
+  `total_salt_form_leaked_train_molecules` /
+  `total_salt_form_leaked_test_molecules`, `config.strip_salts` in the
+  report, and a "Same Parent Compound, Different Salt Form" text report
+  section. The Tanimoto check skips pairs that share a parent. Because the
+  setting is on by default, existing audits can report new leakage.
 - Stereoisomer and racemate/enantiomer matching via the InChIKey
   connectivity block (`inchikey_connectivity`), within a pool and across
   pools (#10). A connectivity match is only reported when the rows don't

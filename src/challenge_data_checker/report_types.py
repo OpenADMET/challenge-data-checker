@@ -8,22 +8,36 @@ renders it. They add no runtime behaviour.
 from typing import Literal, TypedDict
 
 # Chemical representations compared by the leakage and duplicate checks (see
-# ``checks._representation_key_funcs``). All but the stereo-insensitive ones
-# are exact: a match means the same structure, stereochemistry included.
-type Representation = Literal["raw_smiles", "canonical_smiles", "inchikey", "inchikey_connectivity"]
+# ``checks._representation_key_funcs``). The exact ones match only the same
+# structure, stereochemistry and salt form included; the coarse ones
+# deliberately ignore part of the structure.
+type Representation = Literal[
+    "raw_smiles", "canonical_smiles", "inchikey", "parent_inchikey", "inchikey_connectivity"
+]
 REPRESENTATIONS: tuple[Representation, ...] = (
     "raw_smiles",
     "canonical_smiles",
     "inchikey",
+    "parent_inchikey",
     "inchikey_connectivity",
 )
+# Representations that ignore the salt form: the InChIKey of the salt- and
+# solvent-stripped, neutralised parent (only compared when the
+# ``strip_salts`` setting is on). A match groups a salt with its free base
+# or another salt form of the same compound, stereochemistry included.
+SALT_FORM_INSENSITIVE_REPRESENTATIONS: frozenset[Representation] = frozenset({"parent_inchikey"})
 # Representations that ignore stereochemistry: the first (connectivity)
 # block of the InChIKey. A match groups stereoisomers and racemate /
-# enantiomer pairs, and is only reported when the members don't all share
-# one full InChIKey (otherwise it would just repeat an exact match).
+# enantiomer pairs.
 STEREO_INSENSITIVE_REPRESENTATIONS: frozenset[Representation] = frozenset({"inchikey_connectivity"})
+# A group under a coarse representation is only reported when its members
+# don't all share one full InChIKey; otherwise it would just repeat an
+# exact match.
+COARSE_REPRESENTATIONS: frozenset[Representation] = (
+    SALT_FORM_INSENSITIVE_REPRESENTATIONS | STEREO_INSENSITIVE_REPRESENTATIONS
+)
 EXACT_REPRESENTATIONS: tuple[Representation, ...] = tuple(
-    r for r in REPRESENTATIONS if r not in STEREO_INSENSITIVE_REPRESENTATIONS
+    r for r in REPRESENTATIONS if r not in COARSE_REPRESENTATIONS
 )
 
 # Per-pool quality-filter categories (see ``report.quality_flag_entries``).
@@ -94,6 +108,7 @@ class InternalDuplicates(TypedDict):
     raw_smiles: list[DuplicateFinding]
     canonical_smiles: list[DuplicateFinding]
     inchikey: list[DuplicateFinding]
+    parent_inchikey: list[DuplicateFinding]
     inchikey_connectivity: list[DuplicateFinding]
     identifiers: dict[str, list[DuplicateFinding]]
 
@@ -160,6 +175,8 @@ class Summary(TypedDict):
     total_unparseable_test: int
     total_exact_leaked_train_molecules: int
     total_exact_leaked_test_molecules: int
+    total_salt_form_leaked_train_molecules: int
+    total_salt_form_leaked_test_molecules: int
     total_stereo_leaked_train_molecules: int
     total_stereo_leaked_test_molecules: int
     total_identifier_leakage_events: int
@@ -183,6 +200,7 @@ class ReportConfig(TypedDict):
     resolved_smiles_columns: PerPool[dict[str, str]]
     identifier_columns: list[str]
     tautomer_standardisation: bool
+    strip_salts: bool
     max_train_test_similarity: float
     fp_radius: int
     fp_n_bits: int

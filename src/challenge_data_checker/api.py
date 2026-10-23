@@ -50,6 +50,7 @@ def audit(
     smiles_column: str = "SMILES",
     identifier_columns: Sequence[str] | None = None,
     tautomer_standardisation: bool = False,
+    strip_salts: bool = True,
     max_train_test_similarity: float = 1.0,
     fp_radius: int = 2,
     fp_n_bits: int = 2048,
@@ -79,6 +80,10 @@ def audit(
         leakage/namespace issues.
     tautomer_standardisation : bool
         Whether to canonicalise tautomers before comparing molecules.
+    strip_salts : bool
+        Whether to also compare molecules by their salt- and
+        solvent-stripped parent compound, so a salt in one pool matches
+        its free base (or another salt form) in the other.
     max_train_test_similarity : float
         Tanimoto similarity threshold (0.0-1.0, inclusive) at or above
         which a train/test pair is flagged as possible leakage.
@@ -115,6 +120,7 @@ def audit(
         ),
         settings=SettingsConfig(
             tautomer_standardisation=tautomer_standardisation,
+            strip_salts=strip_salts,
             max_train_test_similarity=max_train_test_similarity,
             fp_radius=fp_radius,
             fp_n_bits=fp_n_bits,

@@ -8,7 +8,7 @@ from rdkit import DataStructs
 
 from challenge_data_checker.models import MoleculeRecord
 from challenge_data_checker.report_types import (
-    STEREO_INSENSITIVE_REPRESENTATIONS,
+    COARSE_REPRESENTATIONS,
     DuplicateFinding,
     IdentifierOccurrences,
     InternalDuplicates,
@@ -71,20 +71,28 @@ def _index_by(records: list[MoleculeRecord], key_func: KeyFunc) -> dict[str, lis
     return index
 
 
-def _representation_key_funcs() -> dict[Representation, KeyFunc]:
+def _representation_key_funcs(strip_salts: bool = True) -> dict[Representation, KeyFunc]:
     """Build the key functions for each chemical representation.
+
+    Parameters
+    ----------
+    strip_salts : bool
+        Whether to compare salt-stripped parent compounds. If ``False``,
+        the ``parent_inchikey`` key matches nothing.
 
     Returns
     -------
     dict[Representation, KeyFunc]
         A mapping of representation name (``raw_smiles``,
-        ``canonical_smiles``, ``inchikey``, ``inchikey_connectivity``) to
-        a function extracting that representation's value from a record.
+        ``canonical_smiles``, ``inchikey``, ``parent_inchikey``,
+        ``inchikey_connectivity``) to a function extracting that
+        representation's value from a record.
     """
     return {
         "raw_smiles": lambda r: r.raw_smiles if r.raw_smiles else None,
         "canonical_smiles": lambda r: r.canonical_smiles,
         "inchikey": lambda r: r.inchikey,
+        "parent_inchikey": (lambda r: r.parent_inchikey) if strip_salts else (lambda r: None),
         "inchikey_connectivity": _connectivity_key,
     }
 
@@ -111,9 +119,10 @@ def _connectivity_key(record: MoleculeRecord) -> str | None:
 def _is_reportable(name: Representation, records: list[MoleculeRecord]) -> bool:
     """Decide whether a group of records sharing a representation is worth reporting.
 
-    Exact representations always are. A stereo-insensitive group is only
-    reported when its records don't all share one full InChIKey; otherwise
-    it would just repeat the exact InChIKey match.
+    Exact representations always are. A coarse (salt-form- or
+    stereo-insensitive) group is only reported when its records don't all
+    share one full InChIKey; otherwise it would just repeat the exact
+    InChIKey match.
 
     Parameters
     ----------
@@ -127,7 +136,7 @@ def _is_reportable(name: Representation, records: list[MoleculeRecord]) -> bool:
     bool
         Whether the group should be reported under ``name``.
     """
-    if name not in STEREO_INSENSITIVE_REPRESENTATIONS:
+    if name not in COARSE_REPRESENTATIONS:
         return True
     return len({r.inchikey for r in records}) > 1
 
@@ -153,14 +162,18 @@ def _identifier_key_func(col: str) -> KeyFunc:
 
 
 def train_test_leakage(
-    train_records: list[MoleculeRecord], test_records: list[MoleculeRecord]
+    train_records: list[MoleculeRecord],
+    test_records: list[MoleculeRecord],
+    strip_salts: bool = True,
 ) -> dict[str, list[LeakageFinding]]:
     """Find structures present in both pools, per representation.
 
     Exact representations (raw SMILES, canonical SMILES, InChIKey) report
-    every shared value. The stereo-insensitive ``inchikey_connectivity``
-    only reports values whose train and test records don't all share one
-    full InChIKey, i.e. stereoisomers and racemate / enantiomer pairs.
+    every shared value. The coarse representations only report values
+    whose train and test records don't all share one full InChIKey:
+    ``parent_inchikey`` finds a salt and its free base (or another salt
+    form), and ``inchikey_connectivity`` finds stereoisomers and racemate /
+    enantiomer pairs.
 
     Parameters
     ----------
@@ -168,6 +181,8 @@ def train_test_leakage(
         Processed records from the training pool.
     test_records : list[MoleculeRecord]
         Processed records from the test pool.
+    strip_salts : bool
+        Whether to compare salt-stripped parent compounds.
 
     Returns
     -------
@@ -176,7 +191,7 @@ def train_test_leakage(
         each with the shared value and its train/test occurrences.
     """
     result: dict[str, list[LeakageFinding]] = {}
-    for name, key_func in _representation_key_funcs().items():
+    for name, key_func in _representation_key_funcs(strip_salts).items():
         train_index = _index_by(train_records, key_func)
         test_index = _index_by(test_records, key_func)
         shared = sorted(set(train_index) & set(test_index))
@@ -267,7 +282,7 @@ def _duplicates_by(
 
 
 def internal_duplicates(
-    records: list[MoleculeRecord], identifier_columns: list[str]
+    records: list[MoleculeRecord], identifier_columns: list[str], strip_salts: bool = True
 ) -> InternalDuplicates:
     """Find values that appear more than once within a single pool.
 
@@ -277,17 +292,20 @@ def internal_duplicates(
         Processed records from a single pool (train-only or test-only).
     identifier_columns : list[str]
         Identifier column names to check.
+    strip_salts : bool
+        Whether to compare salt-stripped parent compounds.
 
     Returns
     -------
     InternalDuplicates
         A mapping with one entry per representation (``raw_smiles``,
-        ``canonical_smiles``, ``inchikey``, ``inchikey_connectivity``) plus
-        an ``"identifiers"`` entry mapping each identifier column to its own duplicate
-        findings. Each finding lists the duplicated value and all of its
+        ``canonical_smiles``, ``inchikey``, ``parent_inchikey``,
+        ``inchikey_connectivity``) plus an ``"identifiers"`` entry
+        mapping each identifier column to its own duplicate findings.
+        Each finding lists the duplicated value and all of its
         occurrences.
     """
-    key_funcs = _representation_key_funcs()
+    key_funcs = _representation_key_funcs(strip_salts)
 
     def dupes(name: Representation) -> list[DuplicateFinding]:
         return _duplicates_by(records, key_funcs[name], name)
@@ -296,6 +314,7 @@ def internal_duplicates(
         "raw_smiles": dupes("raw_smiles"),
         "canonical_smiles": dupes("canonical_smiles"),
         "inchikey": dupes("inchikey"),
+        "parent_inchikey": dupes("parent_inchikey"),
         "inchikey_connectivity": dupes("inchikey_connectivity"),
         "identifiers": {
             col: _duplicates_by(records, _identifier_key_func(col)) for col in identifier_columns
@@ -387,18 +406,44 @@ def identifier_namespace_issues(
     return result
 
 
+def _already_matched(a: MoleculeRecord, b: MoleculeRecord, strip_salts: bool) -> bool:
+    """Whether two records already match on connectivity or (optionally) parent compound.
+
+    Parameters
+    ----------
+    a : MoleculeRecord
+        The first record.
+    b : MoleculeRecord
+        The second record.
+    strip_salts : bool
+        Whether a shared parent compound counts as a match.
+
+    Returns
+    -------
+    bool
+        ``True`` if the records share an InChIKey connectivity block, or
+        ``strip_salts`` is on and they share a parent InChIKey.
+    """
+    connectivity = _connectivity_key(a)
+    if connectivity is not None and connectivity == _connectivity_key(b):
+        return True
+    return strip_salts and a.parent_inchikey is not None and a.parent_inchikey == b.parent_inchikey
+
+
 def tanimoto_leakage(
     train_records: list[MoleculeRecord],
     test_records: list[MoleculeRecord],
     threshold: float,
+    strip_salts: bool = True,
 ) -> list[TanimotoFinding]:
     """Compute bulk pairwise Tanimoto similarity between train and test fingerprints.
 
     Flags pairs with similarity >= threshold as possible data leakage,
-    excluding pairs that share an InChIKey connectivity block: those are
-    already reported by ``train_test_leakage``, as an exact InChIKey match
-    or, if only the stereochemistry differs, a connectivity match. Uses
-    RDKit's ``BulkTanimotoSimilarity`` to avoid nested Python loops.
+    excluding pairs that ``train_test_leakage`` already reports: those
+    sharing an InChIKey connectivity block (an exact InChIKey match, or
+    only the stereochemistry differs) and, with ``strip_salts``, those
+    sharing a parent compound. Uses RDKit's ``BulkTanimotoSimilarity`` to
+    avoid nested Python loops.
 
     Parameters
     ----------
@@ -408,6 +453,9 @@ def tanimoto_leakage(
         Processed records from the test pool.
     threshold : float
         Minimum Tanimoto similarity (inclusive) to flag a pair.
+    strip_salts : bool
+        Whether parent-compound matches are reported elsewhere, and so
+        skipped here.
 
     Returns
     -------
@@ -437,8 +485,7 @@ def tanimoto_leakage(
         for test_rec, similarity in zip(test_valid, similarities, strict=True):
             if similarity < threshold:
                 continue
-            train_connectivity = _connectivity_key(train_rec)
-            if train_connectivity is not None and train_connectivity == _connectivity_key(test_rec):
+            if _already_matched(train_rec, test_rec, strip_salts):
                 continue  # already reported by train_test_leakage
             findings.append(
                 {

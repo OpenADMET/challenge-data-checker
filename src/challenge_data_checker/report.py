@@ -26,6 +26,7 @@ from challenge_data_checker.report_types import (
     EXACT_REPRESENTATIONS,
     QUALITY_FLAG_CATEGORIES,
     REPRESENTATIONS,
+    SALT_FORM_INSENSITIVE_REPRESENTATIONS,
     STEREO_INSENSITIVE_REPRESENTATIONS,
     InternalDuplicates,
     LeakageFinding,
@@ -98,8 +99,8 @@ def _leaked_rows(
 
 def _leaked_counts(
     exact_leakage: dict[str, list[LeakageFinding]], side: Literal["train", "test"]
-) -> tuple[int, int]:
-    """Count rows in exact leakage, and rows whose only overlap is stereo-insensitive.
+) -> tuple[int, int, int]:
+    """Count leaked rows by the most exact kind of match each row has.
 
     Parameters
     ----------
@@ -114,13 +115,17 @@ def _leaked_counts(
         Distinct rows in an exact (raw SMILES, canonical SMILES or
         InChIKey) match.
     int
+        Distinct rows in a parent-compound match but no exact match, e.g.
+        a hydrochloride whose free base is in the other pool.
+    int
         Distinct rows in a stereo-insensitive (connectivity) match but
-        no exact match, e.g. one enantiomer of a racemate in the other
-        pool.
+        no exact or parent match, e.g. one enantiomer of a racemate in the
+        other pool.
     """
     exact = _leaked_rows(exact_leakage, side, EXACT_REPRESENTATIONS)
+    salt_form = _leaked_rows(exact_leakage, side, SALT_FORM_INSENSITIVE_REPRESENTATIONS)
     stereo = _leaked_rows(exact_leakage, side, STEREO_INSENSITIVE_REPRESENTATIONS)
-    return len(exact), len(stereo - exact)
+    return len(exact), len(salt_form - exact), len(stereo - exact - salt_form)
 
 
 def build_report(
@@ -160,19 +165,20 @@ def build_report(
     all_records = train_records + test_records
 
     unparseable = unparseable_entries(all_records)
-    exact_leakage = train_test_leakage(train_records, test_records)
+    strip_salts = config.settings.strip_salts
+    exact_leakage = train_test_leakage(train_records, test_records, strip_salts)
     id_leakage = identifier_leakage(train_records, test_records, identifier_columns)
     tanimoto = tanimoto_leakage(
-        train_records, test_records, config.settings.max_train_test_similarity
+        train_records, test_records, config.settings.max_train_test_similarity, strip_salts
     )
-    train_dupes = internal_duplicates(train_records, identifier_columns)
-    test_dupes = internal_duplicates(test_records, identifier_columns)
+    train_dupes = internal_duplicates(train_records, identifier_columns, strip_salts)
+    test_dupes = internal_duplicates(test_records, identifier_columns, strip_salts)
     namespace_issues = identifier_namespace_issues(all_records, identifier_columns)
     quality_train = quality_flag_entries(train_records)
     quality_test = quality_flag_entries(test_records)
 
-    exact_train, stereo_train = _leaked_counts(exact_leakage, "train")
-    exact_test, stereo_test = _leaked_counts(exact_leakage, "test")
+    exact_train, salt_form_train, stereo_train = _leaked_counts(exact_leakage, "train")
+    exact_test, salt_form_test, stereo_test = _leaked_counts(exact_leakage, "test")
     summary: Summary = {
         "total_train_rows": len(train_records),
         "total_test_rows": len(test_records),
@@ -181,6 +187,8 @@ def build_report(
         "total_unparseable_test": sum(1 for r in test_records if not r.is_parsed),
         "total_exact_leaked_train_molecules": exact_train,
         "total_exact_leaked_test_molecules": exact_test,
+        "total_salt_form_leaked_train_molecules": salt_form_train,
+        "total_salt_form_leaked_test_molecules": salt_form_test,
         "total_stereo_leaked_train_molecules": stereo_train,
         "total_stereo_leaked_test_molecules": stereo_test,
         "total_identifier_leakage_events": sum(len(v) for v in id_leakage.values()),
@@ -225,6 +233,7 @@ def build_report(
             "resolved_smiles_columns": resolved_smiles_columns,
             "identifier_columns": identifier_columns,
             "tautomer_standardisation": config.settings.tautomer_standardisation,
+            "strip_salts": config.settings.strip_salts,
             "max_train_test_similarity": config.settings.max_train_test_similarity,
             "fp_radius": config.settings.fp_radius,
             "fp_n_bits": config.settings.fp_n_bits,
@@ -327,6 +336,14 @@ def _build_summary_lines(report: Report) -> list[str]:
         (
             f"  Test compounds in train/test overlap (raw/canonical/InChIKey) : "
             f"{s['total_exact_leaked_test_molecules']}"
+        ),
+        (
+            f"  Train compounds in salt-form-only overlap (same parent)       : "
+            f"{s['total_salt_form_leaked_train_molecules']}"
+        ),
+        (
+            f"  Test compounds in salt-form-only overlap (same parent)        : "
+            f"{s['total_salt_form_leaked_test_molecules']}"
         ),
         (
             f"  Train compounds in stereo-only overlap (same connectivity)    : "
@@ -485,6 +502,14 @@ def _leakage_table(s: Summary) -> Table:
         _status_cell(s["total_exact_leaked_test_molecules"]),
     )
     table.add_row(
+        "Train compounds in salt-form-only overlap",
+        _status_cell(s["total_salt_form_leaked_train_molecules"]),
+    )
+    table.add_row(
+        "Test compounds in salt-form-only overlap",
+        _status_cell(s["total_salt_form_leaked_test_molecules"]),
+    )
+    table.add_row(
         "Train compounds in stereo-only overlap",
         _status_cell(s["total_stereo_leaked_train_molecules"]),
     )
@@ -606,6 +631,8 @@ def _total_issue_count(s: Summary) -> int:
         s["total_unparseable"]
         + s["total_exact_leaked_train_molecules"]
         + s["total_exact_leaked_test_molecules"]
+        + s["total_salt_form_leaked_train_molecules"]
+        + s["total_salt_form_leaked_test_molecules"]
         + s["total_stereo_leaked_train_molecules"]
         + s["total_stereo_leaked_test_molecules"]
         + s["total_identifier_leakage_events"]
@@ -928,6 +955,7 @@ def format_report_as_text(report: Report) -> str:
         f"  smiles_column            : {cfg['smiles_column']}",
         f"  identifier_columns       : {cfg['identifier_columns']}",
         f"  tautomer_standardisation : {cfg['tautomer_standardisation']}",
+        f"  strip_salts              : {cfg['strip_salts']}",
         f"  max_train_test_similarity: {cfg['max_train_test_similarity']}",
         f"  fp_radius                : {cfg['fp_radius']}",
         f"  fp_n_bits                : {cfg['fp_n_bits']}",
@@ -949,6 +977,15 @@ def format_report_as_text(report: Report) -> str:
         _section(
             "Train-Test Leakage: Exact Matches",
             _exact_leakage_lines(report["train_test_leakage"]["exact"], EXACT_REPRESENTATIONS),
+        )
+    )
+    lines.extend(
+        _section(
+            "Train-Test Leakage: Same Parent Compound, Different Salt Form",
+            _exact_leakage_lines(
+                report["train_test_leakage"]["exact"],
+                sorted(SALT_FORM_INSENSITIVE_REPRESENTATIONS),
+            ),
         )
     )
     lines.extend(

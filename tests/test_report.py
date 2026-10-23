@@ -266,3 +266,22 @@ def test_build_report_counts_stereo_only_overlap_separately(tmp_path):
     text = format_report_as_text(report)
     stereo_section = text.split("Same Connectivity, Different Stereochemistry")[1]
     assert "'CC(N)C(=O)O'" in stereo_section.split("Tanimoto")[0]
+
+
+def test_build_report_counts_salt_form_only_overlap_separately(tmp_path):
+    processor = MoleculeProcessor(SettingsConfig())
+    train = [processor.process_row("train", "train.csv", 0, "CCN(CC)CC.Cl", {})]
+    test = [processor.process_row("test", "test.csv", 0, "CCN(CC)CC", {})]
+
+    report = build_report(make_config(tmp_path), train, test, [])
+
+    s = report["summary"]
+    assert s["total_exact_leaked_test_molecules"] == 0
+    assert s["total_salt_form_leaked_train_molecules"] == 1
+    assert s["total_salt_form_leaked_test_molecules"] == 1
+    assert s["total_stereo_leaked_test_molecules"] == 0
+    assert report["config"]["strip_salts"] is True
+    text = format_report_as_text(report)
+    salt_section = text.split("Same Parent Compound, Different Salt Form")[1].split("Same Conn")[0]
+    assert "'CCN(CC)CC.Cl'" in salt_section
+    assert "strip_salts              : True" in text
