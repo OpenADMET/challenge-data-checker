@@ -2,6 +2,8 @@
 
 import re
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -117,15 +119,18 @@ def _download_generic_url(url: str) -> Path:
     -------
     Path
         The path of a local temporary file holding the downloaded content,
-        with the same file extension as the URL's path (so ``.csv``/
-        ``.parquet`` detection downstream still works even with a query
-        string, e.g. a GitHub raw URL with a ``?token=...`` suffix).
+        with the same file extension(s) as the URL's path (so format
+        detection downstream still works even with a query string, e.g. a
+        GitHub raw URL with a ``?token=...`` suffix, or a compound extension
+        like ``.tsv.gz``). The caller owns the file and should delete it
+        when done (see ``fetch_remote_source``).
 
     Raises
     ------
     RemoteSourceError
         If ``requests`` isn't installed, the request fails (HTTP error
-        status or network error).
+        status or network error), or the connection fails mid-download.
+        A partially written temporary file is deleted before raising.
     """
     try:
         import requests
@@ -135,7 +140,7 @@ def _download_generic_url(url: str) -> Path:
             "from a URL. Install it with `pip install -e '.[remote]'`."
         ) from exc
 
-    suffix = Path(urlparse(url).path).suffix
+    suffix = "".join(Path(urlparse(url).path).suffixes)
 
     try:
         response = requests.get(url, stream=True, timeout=60)
@@ -153,10 +158,20 @@ def _download_generic_url(url: str) -> Path:
     except requests.RequestException as exc:
         raise RemoteSourceError(f"Failed to download {url}: {exc}") from exc
 
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as fh:
-        for chunk in response.iter_content(chunk_size=1 << 16):
-            fh.write(chunk)
-        return Path(fh.name)
+    fh = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)  # noqa: SIM115 - closed below
+    local_path = Path(fh.name)
+    completed = False
+    try:
+        with fh:
+            for chunk in response.iter_content(chunk_size=1 << 16):
+                fh.write(chunk)
+        completed = True
+    except requests.RequestException as exc:
+        raise RemoteSourceError(f"Failed to download {url}: {exc}") from exc
+    finally:
+        if not completed:
+            local_path.unlink(missing_ok=True)
+    return local_path
 
 
 def resolve_remote_source(url: str) -> Path:
@@ -182,3 +197,29 @@ def resolve_remote_source(url: str) -> Path:
         repo_id, revision, path = hf_match
         return _download_from_hf_hub(repo_id, revision, path, url)
     return _download_generic_url(url)
+
+
+@contextmanager
+def fetch_remote_source(url: str) -> Iterator[Path]:
+    """Download a data source URL for the duration of a ``with`` block.
+
+    Plain HTTP(S) downloads go to a temporary file that is deleted when the
+    block exits. HuggingFace Hub downloads are left in place, since they
+    live in ``huggingface_hub``'s own cache.
+
+    Parameters
+    ----------
+    url : str
+        The URL to download.
+
+    Yields
+    ------
+    Path
+        The local path of the downloaded file.
+    """
+    local_path = resolve_remote_source(url)
+    try:
+        yield local_path
+    finally:
+        if parse_hf_hub_url(url) is None:
+            local_path.unlink(missing_ok=True)

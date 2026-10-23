@@ -10,10 +10,11 @@ issues. Built for sequential processing of datasets up to ~10,000 molecules.
 
 ## Features
 
-- Loads train/test data from `.csv` or `.parquet` files, local or hosted
-  remotely (HuggingFace Hub or any other URL), with fuzzy SMILES column
-  matching (falls back to case-insensitive and common alias matching, e.g.
-  `structure`, `smi`, `mol`).
+- Loads train/test data from `.csv`, `.tsv` (optionally gzipped, e.g.
+  `.tsv.gz`) or `.parquet` files, local or hosted remotely (HuggingFace Hub
+  or any other URL), with fuzzy SMILES column matching (falls back to
+  case-insensitive and common alias matching, e.g. `standardized_smiles`,
+  `structure`, `smi`).
 - Parses every SMILES with RDKit, with optional tautomer standardisation, and
   computes canonical SMILES, InChIKey, and a stereo-blind Morgan fingerprint.
 - **Train-test leakage**: exact matches on raw SMILES, canonical SMILES,
@@ -93,15 +94,18 @@ fp_n_bits = 2048                     # default 2048 (Morgan fingerprint bit leng
 report_format = "json"               # default "json"; also accepts "txt"
 ```
 
-- `paths.train_files` / `paths.test_files`: one or more `.csv`/`.parquet`
-  files (local paths and/or URLs, freely mixed), pooled together into a
+- `paths.train_files` / `paths.test_files`: one or more `.csv`, `.tsv`,
+  `.csv.gz`, `.tsv.gz` or `.parquet` files (local paths and/or URLs, freely mixed), pooled together into a
   single training/test set respectively.
 - `columns.smiles_column`: resolved per file — exact match first, then
-  case-insensitive, then a unique alias match (`smiles`, `smi`, `structure`,
-  `canonical_smiles`, `molecule`, `mol`). Falling back to an alias match logs
-  a warning and is recorded per file under `config.resolved_smiles_columns`
-  in the report, since it means a different column than configured is being
-  audited.
+  case-insensitive, then an alias match. Aliases in order of preference:
+  `smiles`, `canonical_smiles`, `standardized_smiles`, `standardised_smiles`,
+  `std_smiles`, `isomeric_smiles`, `cxsmiles`, `smi`, `structure`,
+  `molecule`, `mol`. If a file has several, the earliest one is used.
+  Falling back to an alias match logs a warning (naming any alias columns
+  passed over) and is recorded per file under
+  `config.resolved_smiles_columns` in the report, since it means a
+  different column than configured is being audited.
 - `columns.identifier_columns`: optional. A column missing from one file logs
   a warning and is simply skipped for that file's rows, without crashing.
 - `settings.max_train_test_similarity`: pairs with Tanimoto similarity **>=**
@@ -144,7 +148,7 @@ test_files = [
 
 For interactive use (e.g. a Jupyter notebook), call `audit()` directly instead
 of writing a TOML config — every setting is a keyword argument, and
-`train`/`test` each accept a single `.csv`/`.parquet` path or URL (see
+`train`/`test` each accept a single data file path or URL (see
 [Remote data sources](#remote-data-sources)), a single DataFrame, or a list
 mixing any of these:
 

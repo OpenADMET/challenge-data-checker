@@ -67,8 +67,8 @@ def audit(
     Parameters
     ----------
     train : DataInput
-        Training data: a single .csv/.parquet path or DataFrame, or a list
-        mixing either.
+        Training data: a single data file path (.csv, .tsv, optionally
+        gzipped, or .parquet), URL or DataFrame, or a list mixing these.
     test : DataInput
         Test data, in the same shapes as ``train``.
     smiles_column : str

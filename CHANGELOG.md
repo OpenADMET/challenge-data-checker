@@ -8,6 +8,11 @@ All notable changes to this project are recorded here. The format follows
 
 ### Added
 
+- Tab-separated input: `.tsv` files are now accepted alongside `.csv` and
+  `.parquet`, as are gzip-compressed `.csv.gz` and `.tsv.gz`, locally or
+  from a URL (#14).
+- New SMILES column aliases: `standardized_smiles`, `standardised_smiles`,
+  `std_smiles`, `isomeric_smiles` and `cxsmiles` (#15, #7).
 - `py.typed` marker, so type checkers use the package's inline type hints.
 - A warning is logged before the train/test Tanimoto check when it will
   compare more than 100 million pairs (roughly a 10k × 10k split), so a
@@ -29,6 +34,17 @@ All notable changes to this project are recorded here. The format follows
   newest dependencies, and Python 3.12 with the declared minimum versions.
 - `environment.yml`: `rich` moved from the dev tools to the runtime
   dependencies, and its pin updated from 13.6.0 to 15.0.0.
+- SMILES column aliases now have a preference order (`smiles`,
+  `canonical_smiles`, `standardized_smiles`, … `molecule`, `mol`). A file
+  with several alias columns (e.g. `smi` and `structure`) used to be an
+  error; now the most preferred one is used, and the warning names the
+  columns passed over. Two columns that differ only by case are still an
+  error.
+- Files downloaded from a plain (non-HuggingFace) URL are now deleted once
+  loaded, and a partially downloaded file is deleted if the connection
+  fails. They used to be left in the system temp directory (#7).
+  HuggingFace Hub downloads stay in `huggingface_hub`'s own cache as
+  before.
 - The suspicious-fragment check (≤3 heavy atoms) no longer flags
   legitimate small molecules on a new allowlist: methanol, ethanol,
   acetonitrile, formaldehyde, acetaldehyde, formic acid, formamide, simple

@@ -22,8 +22,8 @@ class PathsConfig:
     Attributes
     ----------
     train_files : Sequence[DataSource]
-        Training data sources: paths to .csv/.parquet files, URLs to
-        remote .csv/.parquet files (HuggingFace Hub or plain HTTP(S)),
+        Training data sources: paths to data files, URLs to remote data
+        files (HuggingFace Hub or plain HTTP(S)),
         and/or already-loaded DataFrames (the latter only when built
         directly via the Python API, never from a TOML config).
     test_files : Sequence[DataSource]

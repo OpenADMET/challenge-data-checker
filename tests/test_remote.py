@@ -5,6 +5,7 @@ import pytest
 
 from challenge_data_checker.remote import (
     RemoteSourceError,
+    fetch_remote_source,
     is_remote_source,
     parse_hf_hub_url,
     resolve_remote_source,
@@ -174,3 +175,68 @@ def test_resolve_remote_source_requests_not_installed(monkeypatch):
     url = "https://example.com/file.csv"
     with pytest.raises(RemoteSourceError, match="requests"):
         resolve_remote_source(url)
+
+
+def _fake_streaming_get(monkeypatch, chunks):
+    import requests
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def iter_content(self, chunk_size):
+            for chunk in chunks:
+                if isinstance(chunk, Exception):
+                    raise chunk
+                yield chunk
+
+    monkeypatch.setattr(requests, "get", lambda url, stream, timeout: FakeResponse())
+
+
+def test_resolve_remote_source_keeps_compound_extension(monkeypatch, tmp_path):
+    _fake_streaming_get(monkeypatch, [b"SMILES\n"])
+    monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
+
+    result = resolve_remote_source("https://example.com/data/inhibition.tsv.gz?dl=1")
+
+    assert result.name.endswith(".tsv.gz")
+
+
+def test_resolve_remote_source_deletes_partial_download(monkeypatch, tmp_path):
+    import requests
+
+    _fake_streaming_get(monkeypatch, [b"SMILES\n", requests.ConnectionError("reset")])
+    monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
+
+    with pytest.raises(RemoteSourceError, match="Failed to download"):
+        resolve_remote_source("https://example.com/file.csv")
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_fetch_remote_source_deletes_generic_download_on_exit(monkeypatch, tmp_path):
+    _fake_streaming_get(monkeypatch, [b"SMILES\nCCO\n"])
+    monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
+
+    with fetch_remote_source("https://example.com/file.csv") as path:
+        assert path.read_bytes() == b"SMILES\nCCO\n"
+    assert not path.exists()
+
+
+def test_fetch_remote_source_deletes_generic_download_on_error(monkeypatch, tmp_path):
+    _fake_streaming_get(monkeypatch, [b"SMILES\n"])
+    monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
+
+    with pytest.raises(RuntimeError), fetch_remote_source("https://example.com/file.csv"):
+        raise RuntimeError("load failed")
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_fetch_remote_source_keeps_hf_hub_cache_file(monkeypatch, tmp_path):
+    cached = tmp_path / "cached.csv"
+    cached.write_text("SMILES\nCCO\n")
+    _install_fake_hf_hub(monkeypatch, lambda **kwargs: str(cached), _FakeHfHubHTTPError)
+
+    url = "https://huggingface.co/datasets/org/dataset/resolve/main/file.csv"
+    with fetch_remote_source(url) as path:
+        assert path == cached
+    assert cached.exists()
