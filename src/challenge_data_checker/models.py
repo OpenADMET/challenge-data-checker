@@ -25,8 +25,13 @@ class MoleculeRecord:
     raw_smiles : str
         The raw SMILES string as read from the input file.
     identifiers : dict[str, str | None]
-        Mapping of identifier column name to its value for this row
-        (``None`` if the column was absent or the cell was empty).
+        Mapping of identifier column name to its normalised value for this
+        row, the value every identifier check compares: surrounding
+        whitespace stripped, and casefolded if the
+        ``identifier_case_insensitive`` setting is on. ``None`` if the
+        column was absent or the cell was empty.
+    raw_identifiers : dict[str, str | None]
+        The identifier values exactly as read from the input file.
     parse_error : str | None
         Description of why parsing/processing failed (RDKit's own message
         where available), or ``None`` if the row was processed successfully.
@@ -77,6 +82,7 @@ class MoleculeRecord:
     row_index: int
     raw_smiles: str
     identifiers: dict[str, str | None] = field(default_factory=dict)
+    raw_identifiers: dict[str, str | None] = field(default_factory=dict)
 
     parse_error: str | None = None
     parse_error_category: ParseErrorCategory | None = None

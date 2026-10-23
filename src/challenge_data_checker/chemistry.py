@@ -325,6 +325,31 @@ class MoleculeProcessor:
         """
         return self._fp_generator.GetFingerprint(mol)
 
+    def normalise_identifier(self, value: str | None) -> str | None:
+        """Normalise an identifier value for comparison.
+
+        Surrounding whitespace is never meaningful in an identifier, so it is
+        always stripped; letter case is folded only when the
+        ``identifier_case_insensitive`` setting is on.
+
+        Parameters
+        ----------
+        value : str | None
+            The raw identifier value.
+
+        Returns
+        -------
+        str | None
+            The normalised value, or ``None`` if ``value`` is ``None`` or
+            only whitespace.
+        """
+        if value is None:
+            return None
+        normalised = value.strip()
+        if self.settings.identifier_case_insensitive:
+            normalised = normalised.casefold()
+        return normalised or None
+
     def process_row(
         self,
         pool: str,
@@ -351,7 +376,7 @@ class MoleculeProcessor:
         raw_smiles : str
             The raw SMILES string as read from the input file.
         identifiers : dict[str, str | None]
-            Mapping of identifier column name to its value for this row.
+            Mapping of identifier column name to its raw value for this row.
 
         Returns
         -------
@@ -363,7 +388,8 @@ class MoleculeProcessor:
             source_file=source_file,
             row_index=row_index,
             raw_smiles=raw_smiles,
-            identifiers=identifiers,
+            identifiers={col: self.normalise_identifier(v) for col, v in identifiers.items()},
+            raw_identifiers=dict(identifiers),
         )
 
         parsed = parse_smiles(raw_smiles)

@@ -116,6 +116,20 @@ All notable changes to this project are recorded here. The format follows
   neutralised parent compound (`MoleculeRecord.parent_smiles` /
   `parent_inchikey`) and the classified stripped fragments, ready for
   parent-level leakage matching (#5).
+- **Identifier values are now compared with surrounding whitespace
+  stripped** (#24). ` CPD-1` and `CPD-1` are the same identifier for
+  leakage, duplicate and namespace checks, so this can surface identifier
+  leakage that was previously hidden (FAIL). Each padded value is reported
+  as `identifier_whitespace` (WARN) so it can be fixed upstream.
+- New `identifier_case_insensitive` setting (TOML, `audit()`; default
+  `false`): when on, identifier values that differ only in letter case are
+  the same identifier (#24).
+- New near-duplicate identifier check (WARN): distinct values in one column
+  that differ only in case or `-`/`_` (e.g. `Molport-1` vs `MolPort_1`),
+  across both pools and including rows whose SMILES didn't parse (#24).
+  Reported under `identifier_namespace_issues[col]["near_duplicates"]`,
+  alongside `["identifier_whitespace"]`, with matching counts in the
+  summary and two new columns in the dashboard's identifier table.
 - A SMILES with a control character inside it (e.g. `"CC\nO"`) is now an
   unparseable `control_characters` failure. RDKit stops reading at the
   first whitespace, so it used to be silently read as `CC`.

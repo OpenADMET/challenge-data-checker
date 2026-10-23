@@ -41,7 +41,9 @@ issues. Built for sequential processing of datasets up to ~10,000 molecules.
   identifier column.
 - **Identifier namespace checks**: flags an identifier that maps to more than
   one structure, or a structure that's given more than one identifier, within
-  the same identifier column.
+  the same identifier column. Identifier values are compared with
+  surrounding whitespace stripped. Values that differ only in case or
+  `-`/`_` are flagged as near-duplicates.
 - **Quality filters**: mixtures/disconnected fragments, salts, solvates and
   metal complexes, and suspicious tiny fragments that look like stripped
   degradation artefacts (e.g. a bare cyanide left over from a failed
@@ -119,6 +121,7 @@ identifier_columns = ["compound_id", "external_reg_no"]
 [settings]
 tautomer_standardisation = false     # default false
 strip_salts = true                   # default true (also compare salt-stripped parents)
+identifier_case_insensitive = false  # default false (case-only id differences only WARN)
 max_train_test_similarity = 1.0      # default 1.0 (Tanimoto threshold, inclusive)
 fp_radius = 2                        # default 2 (Morgan fingerprint radius)
 fp_n_bits = 2048                     # default 2048 (Morgan fingerprint bit length)
@@ -145,6 +148,14 @@ report_format = "json"               # default "json"; also accepts "txt"
   `CCN(CC)CC.Cl` in train and `CCN(CC)CC` in test). Matches are reported as
   salt-form-only overlap and as `parent_inchikey` duplicates within a pool.
   On by default; set `false` to compare only the structures as drawn.
+- `settings.identifier_case_insensitive`: identifier values always have
+  surrounding whitespace stripped before comparison (` CPD-1` and `CPD-1`
+  are the same identifier, and the padded value is flagged). With this set
+  to `true`, values that differ only in letter case are also the same
+  identifier. Otherwise they, and values differing only in `-`/`_` (e.g.
+  `Molport-1` vs `MolPort_1`), are reported as near-duplicate identifiers
+  (WARN), since they may be genuinely different IDs in an inconsistent
+  scheme.
 - `settings.max_train_test_similarity`: pairs with Tanimoto similarity **>=**
   this threshold are flagged (excluding pairs already reported as an exact,
   salt-form-only or stereo-only match).
@@ -206,7 +217,8 @@ report = audit(
 
 `report` is the same dict written to `report_output` by the CLI. All
 `[settings]` keys are available as keyword arguments (`smiles_column`,
-`identifier_columns`, `tautomer_standardisation`, `strip_salts`, `max_train_test_similarity`,
+`identifier_columns`, `tautomer_standardisation`, `strip_salts`,
+`identifier_case_insensitive`, `max_train_test_similarity`,
 `fp_radius`, `fp_n_bits`). `report_output`/`report_format` work the same way
 as in the config file, except both are optional: omit `report_output` to skip
 writing a file entirely and only get the dict back. Pass `print_report=False`
@@ -245,6 +257,7 @@ otherwise. Four rules decide the tier:
 | Duplicate stereoisomer (e.g. racemate and enantiomer) | WARN | WARN | |
 | One identifier → several structures | | | FAIL |
 | One structure → several identifiers | | | WARN |
+| Identifier with surrounding whitespace; near-duplicate identifiers (case or `-`/`_` only) | | | WARN |
 | Mixtures, salts/metal complexes, suspicious fragments | WARN | WARN | |
 | SMILES that only parses after stripping whitespace; RDKit parse warnings | WARN | WARN | |
 

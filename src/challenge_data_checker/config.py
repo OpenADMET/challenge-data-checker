@@ -67,6 +67,10 @@ class SettingsConfig:
         Whether to also compare molecules by their salt- and
         solvent-stripped, neutralised parent compound, so a salt in one
         pool matches its free base (or another salt form) in the other.
+    identifier_case_insensitive : bool
+        Whether identifier values that differ only in letter case count as
+        the same identifier. Off by default; case-only differences are
+        then still reported as near-duplicate identifiers (WARN).
     max_train_test_similarity : float
         Tanimoto similarity threshold (0.0-1.0) at or above which a
         train/test pair is flagged as possible leakage.
@@ -83,6 +87,7 @@ class SettingsConfig:
 
     tautomer_standardisation: bool = False
     strip_salts: bool = True
+    identifier_case_insensitive: bool = False
     max_train_test_similarity: float = 1.0
     fp_radius: int = 2
     fp_n_bits: int = 2048
@@ -259,6 +264,7 @@ def load_config(config_path: str | Path) -> Config:
     settings = SettingsConfig(
         tautomer_standardisation=bool(settings_raw.get("tautomer_standardisation", False)),
         strip_salts=bool(settings_raw.get("strip_salts", True)),
+        identifier_case_insensitive=bool(settings_raw.get("identifier_case_insensitive", False)),
         max_train_test_similarity=float(settings_raw.get("max_train_test_similarity", 1.0)),
         fp_radius=int(settings_raw.get("fp_radius", 2)),
         fp_n_bits=int(settings_raw.get("fp_n_bits", 2048)),

@@ -158,11 +158,27 @@ class OneStructureMultipleIds(TypedDict):
     identifiers: list[IdentifierOccurrences]
 
 
+class IdentifierWhitespaceEntry(Location):
+    """A row whose identifier value had surrounding whitespace stripped."""
+
+    raw_value: str
+    value: str
+
+
+class NearDuplicateIdentifiers(TypedDict):
+    """Distinct identifier values that only differ in case or ``-``/``_``."""
+
+    key: str
+    identifiers: list[IdentifierOccurrences]
+
+
 class NamespaceIssues(TypedDict):
-    """Identifier-to-structure consistency findings for one identifier column."""
+    """Identifier consistency findings for one identifier column."""
 
     one_id_multiple_structures: list[OneIdMultipleStructures]
     one_structure_multiple_ids: list[OneStructureMultipleIds]
+    identifier_whitespace: list[IdentifierWhitespaceEntry]
+    near_duplicates: list[NearDuplicateIdentifiers]
 
 
 class QualityFlags(TypedDict):
@@ -180,6 +196,8 @@ class NamespaceIssueCounts(TypedDict):
 
     one_id_multiple_structures: int
     one_structure_multiple_ids: int
+    identifier_whitespace: int
+    near_duplicates: int
 
 
 # Overall audit result: FAIL if any blocking finding, WARN if only flagged
@@ -248,6 +266,7 @@ class ReportConfig(TypedDict):
     identifier_columns: list[str]
     tautomer_standardisation: bool
     strip_salts: bool
+    identifier_case_insensitive: bool
     max_train_test_similarity: float
     fp_radius: int
     fp_n_bits: int

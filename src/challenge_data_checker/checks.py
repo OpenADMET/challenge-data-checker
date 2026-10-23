@@ -1,6 +1,7 @@
 """Leakage, duplicate, and identifier-namespace consistency checks."""
 
 import logging
+import re
 from collections import defaultdict
 from collections.abc import Callable
 
@@ -11,9 +12,11 @@ from challenge_data_checker.report_types import (
     COARSE_REPRESENTATIONS,
     DuplicateFinding,
     IdentifierOccurrences,
+    IdentifierWhitespaceEntry,
     InternalDuplicates,
     LeakageFinding,
     NamespaceIssues,
+    NearDuplicateIdentifiers,
     OneIdMultipleStructures,
     OneStructureMultipleIds,
     Representation,
@@ -331,13 +334,22 @@ def identifier_namespace_issues(
 ) -> dict[str, NamespaceIssues]:
     """Check identifier-to-structure consistency within each identifier column.
 
-    For each identifier column, checked across the combined train+test pool:
+    For each identifier column, checked across the combined train+test pool
+    and on normalised identifier values (see
+    ``MoleculeProcessor.normalise_identifier``):
         - ``one_id_multiple_structures``: a single identifier string maps to
           2+ structurally distinct molecules (differing canonical SMILES
           and/or InChIKey).
         - ``one_structure_multiple_ids``: a single structure (same canonical
           SMILES AND InChIKey) is given 2+ distinct identifier strings within
           that column.
+        - ``identifier_whitespace``: rows whose raw value had surrounding
+          whitespace (stripped before every comparison).
+        - ``near_duplicates``: distinct values that only differ in case or
+          ``-``/``_``.
+
+    The first two only consider rows whose SMILES parsed; the last two
+    consider every row.
 
     Parameters
     ----------
@@ -349,9 +361,7 @@ def identifier_namespace_issues(
     Returns
     -------
     dict[str, NamespaceIssues]
-        A mapping of identifier column name to a dict with
-        ``one_id_multiple_structures`` and ``one_structure_multiple_ids``
-        finding lists.
+        A mapping of identifier column name to its finding lists.
     """
     result: dict[str, NamespaceIssues] = {}
     for col in identifier_columns:
@@ -406,8 +416,94 @@ def identifier_namespace_issues(
         result[col] = {
             "one_id_multiple_structures": one_id_multiple_structures,
             "one_structure_multiple_ids": one_structure_multiple_ids,
+            "identifier_whitespace": _identifier_whitespace(all_records, col),
+            "near_duplicates": _near_duplicate_identifiers(all_records, col),
         }
     return result
+
+
+_NEAR_DUPLICATE_STRIP_RE = re.compile(r"[-_]")
+
+
+def _near_duplicate_key(value: str) -> str:
+    """Reduce an identifier to the form near-duplicates share.
+
+    Parameters
+    ----------
+    value : str
+        A (normalised) identifier value.
+
+    Returns
+    -------
+    str
+        The value casefolded, with ``-`` and ``_`` removed.
+    """
+    return _NEAR_DUPLICATE_STRIP_RE.sub("", value.casefold())
+
+
+def _identifier_whitespace(
+    all_records: list[MoleculeRecord], col: str
+) -> list[IdentifierWhitespaceEntry]:
+    """Find rows whose identifier value had surrounding whitespace stripped.
+
+    Parameters
+    ----------
+    all_records : list[MoleculeRecord]
+        Records from both pools, parsed or not.
+    col : str
+        The identifier column to check.
+
+    Returns
+    -------
+    list[IdentifierWhitespaceEntry]
+        One entry per affected row, with the raw and stripped values.
+    """
+    entries: list[IdentifierWhitespaceEntry] = []
+    for r in all_records:
+        raw = r.raw_identifiers.get(col)
+        if raw is not None and raw != raw.strip():
+            entries.append({**r.location(), "raw_value": raw, "value": raw.strip()})
+    return entries
+
+
+def _near_duplicate_identifiers(
+    all_records: list[MoleculeRecord], col: str
+) -> list[NearDuplicateIdentifiers]:
+    """Group distinct identifier values that only differ in case or ``-``/``_``.
+
+    Such values (e.g. ``Molport-1`` and ``MolPort_1``) are probably the same
+    identifier written inconsistently, but might be distinct identifiers in a
+    poorly designed scheme, so they're flagged rather than merged.
+
+    Parameters
+    ----------
+    all_records : list[MoleculeRecord]
+        Records from both pools, parsed or not.
+    col : str
+        The identifier column to check.
+
+    Returns
+    -------
+    list[NearDuplicateIdentifiers]
+        One group per near-duplicate key with two or more distinct
+        (normalised) values, listing each value's occurrences.
+    """
+    by_key: dict[str, dict[str, list[MoleculeRecord]]] = defaultdict(lambda: defaultdict(list))
+    for r in all_records:
+        value = r.identifiers.get(col)
+        if value is not None:
+            by_key[_near_duplicate_key(value)][value].append(r)
+    return [
+        {
+            "key": key,
+            "identifiers": [
+                {"identifier": value, "occurrences": [r.location() for r in recs]}
+                for value, recs in sorted(values.items())
+            ],
+        }
+        for key, values in sorted(by_key.items())
+        if len(values) > 1
+    ]
 
 
 def _already_matched(a: MoleculeRecord, b: MoleculeRecord, strip_salts: bool) -> bool:

@@ -245,6 +245,8 @@ def build_report(
             col: {
                 "one_id_multiple_structures": len(issues["one_id_multiple_structures"]),
                 "one_structure_multiple_ids": len(issues["one_structure_multiple_ids"]),
+                "identifier_whitespace": len(issues["identifier_whitespace"]),
+                "near_duplicates": len(issues["near_duplicates"]),
             }
             for col, issues in namespace_issues.items()
         },
@@ -280,6 +282,7 @@ def build_report(
             "identifier_columns": identifier_columns,
             "tautomer_standardisation": config.settings.tautomer_standardisation,
             "strip_salts": config.settings.strip_salts,
+            "identifier_case_insensitive": config.settings.identifier_case_insensitive,
             "max_train_test_similarity": config.settings.max_train_test_similarity,
             "fp_radius": config.settings.fp_radius,
             "fp_n_bits": config.settings.fp_n_bits,
@@ -721,7 +724,15 @@ def _namespace_table(s: Summary, context: TierContext) -> Table | None:
     """
     if not s["total_identifier_namespace_issues"]:
         return None
-    table = _new_table(["Identifier column", "1 id -> many structures", "1 structure -> many ids"])
+    table = _new_table(
+        [
+            "Identifier column",
+            "1 id -> many structures",
+            "1 structure -> many ids",
+            "Near-duplicate ids",
+            "Whitespace in ids",
+        ]
+    )
     for col, counts in s["total_identifier_namespace_issues"].items():
         table.add_row(
             col,
@@ -732,6 +743,13 @@ def _namespace_table(s: Summary, context: TierContext) -> Table | None:
             _status_cell(
                 counts["one_structure_multiple_ids"],
                 severity_of("one_structure_multiple_ids", None, context),
+            ),
+            _status_cell(
+                counts["near_duplicates"], severity_of("identifier_near_duplicate", None, context)
+            ),
+            _status_cell(
+                counts["identifier_whitespace"],
+                severity_of("identifier_whitespace", None, context),
             ),
         )
     return table
@@ -1061,6 +1079,8 @@ def _identifier_namespace_lines(namespace_issues: dict[str, NamespaceIssues]) ->
     lines = []
     one_id_tag = _tag("one_id_multiple_structures", None, TierContext())
     one_structure_tag = _tag("one_structure_multiple_ids", None, TierContext())
+    near_tag = _tag("identifier_near_duplicate", None, TierContext())
+    whitespace_tag = _tag("identifier_whitespace", None, TierContext())
     for column, issues in namespace_issues.items():
         for finding in issues["one_id_multiple_structures"]:
             lines.append(
@@ -1082,6 +1102,20 @@ def _identifier_namespace_lines(namespace_issues: dict[str, NamespaceIssues]) ->
             for identifier in ids_finding["identifiers"]:
                 lines.append(f"    identifier={identifier['identifier']!r}")
                 lines.extend(_fmt_locations(identifier["occurrences"], indent="        "))
+        for group in issues["near_duplicates"]:
+            values = ", ".join(repr(i["identifier"]) for i in group["identifiers"])
+            lines.append(
+                f"  {near_tag} {column}: near-duplicate identifiers {values} "
+                "(differ only in case or -/_)"
+            )
+            for identifier in group["identifiers"]:
+                lines.append(f"    identifier={identifier['identifier']!r}")
+                lines.extend(_fmt_locations(identifier["occurrences"], indent="        "))
+        for entry in issues["identifier_whitespace"]:
+            lines.append(
+                f"  {whitespace_tag} {column}: {entry['raw_value']!r} has surrounding "
+                f"whitespace, compared as {entry['value']!r}: {_fmt_location(entry)}"
+            )
     return lines
 
 
@@ -1151,6 +1185,7 @@ def format_report_as_text(report: Report) -> str:
         f"  identifier_columns       : {cfg['identifier_columns']}",
         f"  tautomer_standardisation : {cfg['tautomer_standardisation']}",
         f"  strip_salts              : {cfg['strip_salts']}",
+        f"  identifier_case_insens.  : {cfg['identifier_case_insensitive']}",
         f"  max_train_test_similarity: {cfg['max_train_test_similarity']}",
         f"  fp_radius                : {cfg['fp_radius']}",
         f"  fp_n_bits                : {cfg['fp_n_bits']}",
