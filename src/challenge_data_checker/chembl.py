@@ -25,6 +25,7 @@ import sqlite3
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import quote
 
 from challenge_data_checker.report_types import (
     ChemblActivity,
@@ -99,8 +100,12 @@ def connect(database_path: str | Path) -> sqlite3.Connection:
     path = Path(database_path)
     if not path.is_file():
         raise ChemblSourceError(f"ChEMBL SQLite release not found: {path}")
+    # The path goes into a URI, where '#', '?' and '%' are syntax: an
+    # unescaped '#' truncates the path and drops ?mode=ro with it, so SQLite
+    # would open a different file, writable. quote() leaves '/' alone.
+    uri = f"file:{quote(str(path.resolve()))}?mode=ro"
     try:
-        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        conn = sqlite3.connect(uri, uri=True)
     except sqlite3.Error as exc:
         raise ChemblSourceError(f"Could not open {path} as a SQLite database: {exc}") from exc
     conn.row_factory = sqlite3.Row
@@ -162,7 +167,20 @@ def read_source(conn: sqlite3.Connection, database_path: str | Path) -> ChemblSo
             database_path,
         )
         return source
-    row = conn.execute(f"SELECT {', '.join(wanted)} FROM version LIMIT 1").fetchone()
+    # version is keyed by name and is not guaranteed to hold only the
+    # database release, so the ChEMBL row is preferred over whichever row
+    # happens to come first. Any row is better than none, hence the fallback.
+    rows = conn.execute(f"SELECT {', '.join(wanted)} FROM version").fetchall()
+    row = next(
+        (
+            candidate
+            for candidate in rows
+            if "name" in wanted
+            and candidate["name"] is not None
+            and str(candidate["name"]).upper().startswith("CHEMBL")
+        ),
+        rows[0] if rows else None,
+    )
     if row is None:
         return source
     if "name" in wanted and row["name"] is not None:
@@ -458,6 +476,9 @@ SELECT a.molregno AS molregno,
        td.chembl_id AS target_chembl_id,
        td.pref_name AS target_name,
        td.organism AS organism,
+       -- An activity has its own doc_id, which ChEMBL permits to differ from
+       -- its assay's, so the measurement is cited to the document it actually
+       -- came from and only falls back to the assay's.
        d.chembl_id AS document_chembl_id,
        d.journal AS journal,
        d.year AS year,
@@ -466,7 +487,7 @@ FROM temp.cdc_molregnos m
 CROSS JOIN activities a ON a.molregno = m.key
 JOIN assays ass ON ass.assay_id = a.assay_id
 LEFT JOIN target_dictionary td ON td.tid = ass.tid
-LEFT JOIN docs d ON d.doc_id = ass.doc_id
+LEFT JOIN docs d ON d.doc_id = COALESCE(a.doc_id, ass.doc_id)
 """
 
 # The same query for a release with no docs table, so the search still runs

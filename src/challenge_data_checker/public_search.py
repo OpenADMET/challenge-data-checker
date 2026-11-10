@@ -30,6 +30,7 @@ listed but never flagged.
 import logging
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 
 from challenge_data_checker.chembl import CONNECTIVITY_BLOCK_LENGTH, StructureMatch
 from challenge_data_checker.models import MoleculeRecord
@@ -173,6 +174,29 @@ def lookup_keys(
     return {representation: sorted(values) for representation, values in index.items() if values}
 
 
+def _has_result(activity: ChemblActivity) -> bool:
+    """Whether an activity actually carries a measured result.
+
+    ChEMBL holds activity rows with no numeric result, for example an
+    endpoint recorded as "Not Determined". Those say the endpoint was
+    *looked at*, not that it was measured, so they cannot expose a
+    challenge answer and must not block a release. Only numeric results are
+    recognised, so a purely qualitative record (an active/inactive call
+    with no value) is also treated as no result.
+
+    Parameters
+    ----------
+    activity : ChemblActivity
+        The activity to check.
+
+    Returns
+    -------
+    bool
+        ``True`` if it has a standard value or a pChEMBL value.
+    """
+    return activity["standard_value"] is not None or activity["pchembl_value"] is not None
+
+
 def classify_activity(
     activity: ChemblActivity,
     *,
@@ -203,8 +227,12 @@ def classify_activity(
     PublicMatchType | None
         ``"explicit_id"`` if the configuration named this assay or target,
         ``"target_type"`` if a resolved target and an allowed measurement
-        type both match, otherwise ``None``.
+        type both match, otherwise ``None``. Also ``None`` for a record
+        with no measured result, which exposes no answer.
     """
+    if not _has_result(activity):
+        return None
+
     assay_id = activity["assay_chembl_id"]
     target_id = activity["target_chembl_id"]
     if assay_id is not None and assay_id in assay_chembl_ids:
@@ -309,7 +337,66 @@ def build_presence(
     return presence
 
 
-def build_findings(
+@dataclass(frozen=True)
+class EndpointMatch:
+    """One matched key whose public record measures the challenge endpoint.
+
+    The intermediate form between the raw lookups and the report: every
+    piece of evidence found, before any of it is deduplicated into
+    findings. ``summarise_documents`` reads all of these, so a paper is
+    never dropped from the document summary just because another
+    representation reported the same row.
+
+    Attributes
+    ----------
+    representation : Representation
+        Which representation matched.
+    value : str
+        The matched representation's value.
+    match_type : PublicMatchType
+        The strongest endpoint evidence found for this key.
+    rank : int
+        The representation's position in ``PUBLIC_SEARCH_REPRESENTATIONS``,
+        lowest (most exact) first.
+    compounds : tuple[ChemblCompound, ...]
+        The ChEMBL compounds the key matched.
+    activities : tuple[ChemblActivity, ...]
+        The activities establishing ``match_type``.
+    records : tuple[MoleculeRecord, ...]
+        The test rows holding this structure.
+    """
+
+    representation: Representation
+    value: str
+    match_type: PublicMatchType
+    rank: int
+    compounds: tuple[ChemblCompound, ...]
+    activities: tuple[ChemblActivity, ...]
+    records: tuple[MoleculeRecord, ...]
+
+    @property
+    def strength(self) -> int:
+        """How strong this match's endpoint evidence is.
+
+        Returns
+        -------
+        int
+            The match type's strength, higher being stronger.
+        """
+        return _MATCH_STRENGTH[self.match_type]
+
+    def rows(self) -> frozenset[RowKey]:
+        """The distinct test rows this match covers.
+
+        Returns
+        -------
+        frozenset[RowKey]
+            Their (pool, source_file, row_index) identities.
+        """
+        return frozenset(_row_key(record.location()) for record in self.records)
+
+
+def collect_endpoint_matches(
     index: Mapping[Representation, Mapping[str, Sequence[MoleculeRecord]]],
     grouped: Mapping[tuple[Representation, str], Sequence[ChemblCompound]],
     activities_by_molregno: Mapping[int, Sequence[ChemblActivity]],
@@ -318,17 +405,14 @@ def build_findings(
     target_chembl_ids: Iterable[str],
     resolved_target_chembl_ids: Iterable[str],
     standard_types: Iterable[str],
-) -> list[PublicLeakageFinding]:
-    """Build the endpoint-match findings for every matched test structure.
+) -> list[EndpointMatch]:
+    """Find every matched key whose public record measures the endpoint.
 
-    One finding per matched key, carrying its strongest evidence: a
-    structure with both an explicitly named assay and a weaker
-    target-plus-type record is reported once, as the explicit match.
-
-    Representations are walked exact-first, and a coarser representation is
-    skipped when its test rows are already covered by an equal-or-stronger
-    finding, so one leak seen through the InChIKey, the parent and the
-    connectivity block counts once rather than three times.
+    No deduplication happens here: one leak seen through the InChIKey, the
+    salt-stripped parent and the connectivity block yields three matches.
+    ``build_findings`` reduces them to one finding per test row, while
+    ``summarise_documents`` keeps all of them so no source document is
+    lost.
 
     Parameters
     ----------
@@ -349,30 +433,25 @@ def build_findings(
 
     Returns
     -------
-    list[PublicLeakageFinding]
-        The findings, in representation then value order.
+    list[EndpointMatch]
+        One per matched key with endpoint evidence, in representation then
+        value order.
     """
     assays = frozenset(assay_chembl_ids)
     targets = frozenset(target_chembl_ids)
     resolved = frozenset(resolved_target_chembl_ids)
     types = frozenset(t.lower() for t in standard_types)
 
-    findings: list[PublicLeakageFinding] = []
-    # The strongest finding already reported for each test row, so a coarse
-    # representation can tell whether it would be repeating one.
-    covered: dict[RowKey, int] = {}
-
-    for representation in PUBLIC_SEARCH_REPRESENTATIONS:
+    matches: list[EndpointMatch] = []
+    for rank, representation in enumerate(PUBLIC_SEARCH_REPRESENTATIONS):
         values = index.get(representation) or {}
         for value in sorted(values):
             compounds = grouped.get((representation, value))
             if not compounds:
                 continue
-            matched: dict[PublicMatchType, list[ChemblActivity]] = defaultdict(list)
+            by_type: dict[PublicMatchType, list[ChemblActivity]] = defaultdict(list)
             for compound in compounds:
                 for activity in activities_by_molregno.get(compound["molregno"], ()):
-                    # Named apart from the chosen match_type below, which is
-                    # never None.
                     activity_match = classify_activity(
                         activity,
                         assay_chembl_ids=assays,
@@ -381,32 +460,81 @@ def build_findings(
                         standard_types=types,
                     )
                     if activity_match is not None:
-                        matched[activity_match].append(activity)
-            if not matched:
+                        by_type[activity_match].append(activity)
+            if not by_type:
                 continue
-            match_type = max(matched, key=lambda m: _MATCH_STRENGTH[m])
-            strength = _MATCH_STRENGTH[match_type]
-            records = values[value]
-            rows = {_row_key(record.location()) for record in records}
-            if all(covered.get(row, 0) >= strength for row in rows):
-                continue
-            findings.append(
-                {
-                    "value": value,
-                    "representation": representation,
-                    "match_type": match_type,
-                    "test_occurrences": _locations(records),
-                    "compounds": list(compounds),
-                    "activities": matched[match_type],
-                }
+            match_type = max(by_type, key=lambda m: _MATCH_STRENGTH[m])
+            matches.append(
+                EndpointMatch(
+                    representation=representation,
+                    value=value,
+                    match_type=match_type,
+                    rank=rank,
+                    compounds=tuple(compounds),
+                    activities=tuple(by_type[match_type]),
+                    records=tuple(values[value]),
+                )
             )
-            for row in rows:
-                covered[row] = max(covered.get(row, 0), strength)
+    return matches
+
+
+def build_findings(matches: Sequence[EndpointMatch]) -> list[PublicLeakageFinding]:
+    """Reduce endpoint matches to one finding per test row.
+
+    A single leaked compound matches through several representations at
+    once, and the project counts a problem once (#4). So each test row is
+    assigned to exactly one match, the strongest and then the most exact,
+    and every match reports only the rows assigned to it. A match left with
+    no rows is dropped.
+
+    Assigning rows rather than skipping whole matches matters when a group
+    only partly overlaps an earlier one: searching a racemate and one of
+    its enantiomers together, the connectivity group holds both rows while
+    the exact group holds only the racemate, so the stereo finding must
+    report the enantiomer alone and not re-report the racemate.
+
+    Parameters
+    ----------
+    matches : Sequence[EndpointMatch]
+        Every endpoint match, from ``collect_endpoint_matches``.
+
+    Returns
+    -------
+    list[PublicLeakageFinding]
+        The findings, in representation then value order.
+    """
+    # Strongest evidence wins; then the most exact representation; then the
+    # value, so the choice never depends on dict ordering.
+    winner: dict[RowKey, EndpointMatch] = {}
+    for match in matches:
+        key = (-match.strength, match.rank, match.value)
+        for row in match.rows():
+            current = winner.get(row)
+            if current is None or key < (-current.strength, current.rank, current.value):
+                winner[row] = match
+
+    findings: list[PublicLeakageFinding] = []
+    for match in matches:
+        mine = [
+            record for record in match.records if winner.get(_row_key(record.location())) is match
+        ]
+        if not mine:
+            continue
+        findings.append(
+            {
+                "value": match.value,
+                "representation": match.representation,
+                "match_type": match.match_type,
+                "test_occurrences": _locations(mine),
+                "compounds": list(match.compounds),
+                "activities": list(match.activities),
+            }
+        )
     return findings
 
 
 def summarise_documents(
-    findings: Sequence[PublicLeakageFinding], total_test_rows: int
+    matches: Sequence[EndpointMatch], total_test_rows: int
 ) -> list[PublicDocumentSummary]:
     """Summarise how much of the test set each source document covers.
 
@@ -414,10 +542,16 @@ def summarise_documents(
     the strongest unblinding signal available: it means a single paper holds
     the challenge's answers.
 
+    Built from every endpoint match rather than from the deduplicated
+    findings, so a paper is still counted when another representation
+    happened to report the same row. Otherwise a compound measured in two
+    papers, reached through its InChIKey and its salt-stripped parent,
+    would silently drop one of them.
+
     Parameters
     ----------
-    findings : Sequence[PublicLeakageFinding]
-        The findings to group.
+    matches : Sequence[EndpointMatch]
+        Every endpoint match, from ``collect_endpoint_matches``.
     total_test_rows : int
         Total rows in the test set, used for the fraction.
 
@@ -428,14 +562,15 @@ def summarise_documents(
     """
     rows_by_document: dict[str, set[RowKey]] = defaultdict(set)
     reference_by_document: dict[str, str | None] = {}
-    for finding in findings:
-        rows = {_row_key(location) for location in finding["test_occurrences"]}
-        for activity in finding["activities"]:
+    for match in matches:
+        rows = match.rows()
+        for activity in match.activities:
             document = activity["document_chembl_id"]
             if document is None:
                 continue
             rows_by_document[document] |= rows
-            reference_by_document.setdefault(document, activity["document_reference"])
+            if reference_by_document.get(document) is None:
+                reference_by_document[document] = activity["document_reference"]
 
     summaries: list[PublicDocumentSummary] = [
         {

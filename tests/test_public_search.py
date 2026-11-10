@@ -4,7 +4,10 @@ import pytest
 from chembl_fixture import (
     CYP3A4_ASSAY,
     CYP3A4_DOCUMENT,
+    CYP3A4_DOCUMENT_2,
+    CYP3A4_DOCUMENT_3,
     CYP3A4_TARGET,
+    OTHER_VERSION_NAME,
     RELEASE_DATE,
     RELEASE_NAME,
     build_fixture,
@@ -34,6 +37,13 @@ CAFFEINE = "Cn1c(=O)c2c(ncn2C)n(C)c1=O"
 PROPRANOLOL_FREE_BASE = "CC(C)NCC(O)COc1cccc2ccccc12"
 S_IBUPROFEN = "CC(C)Cc1ccc([C@@H](C)C(=O)O)cc1"
 ASPIRIN = "CC(=O)Oc1ccccc1C(=O)O"
+RACEMIC_IBUPROFEN = "CC(C)Cc1ccc(C(C)C(=O)O)cc1"
+# In ChEMBL with a CYP3A4 record that has no measured result.
+PARACETAMOL = "CC(=O)Nc1ccc(O)cc1"
+# Measured in one paper itself, and in another through its salt form.
+METOPROLOL_FREE_BASE = "CC(C)NCC(O)COc1ccc(CCOC)cc1"
+# Its activity's own doc_id differs from its assay's.
+THEOPHYLLINE = "Cn1c(=O)c2[nH]cnc2n(C)c1=O"
 # Not in the fixture at all: the negative control.
 OCTANOL = "CCCCCCCCO"
 
@@ -296,3 +306,85 @@ def test_config_requires_a_release_path():
 def test_config_rejects_a_non_list_matcher():
     with pytest.raises(ConfigError, match="must be a list of strings"):
         parse_public_search({"chembl_sqlite": "c.sqlite", "target_names": "CYP3A4"})
+
+
+def test_partially_overlapping_groups_do_not_report_a_row_twice(chembl):
+    # Regression: searching a racemate together with one of its enantiomers,
+    # the connectivity group holds both rows while the exact group holds only
+    # the racemate. The stereo finding must report the enantiomer alone;
+    # otherwise the racemate sits in a blocking and a flagged finding at once
+    # and is counted twice, which #4 forbids.
+    report = search(chembl, [RACEMIC_IBUPROFEN, S_IBUPROFEN], match_connectivity=True)
+    assert matches(report) == [
+        ("inchikey", "explicit_id"),
+        ("inchikey_connectivity", "explicit_id"),
+    ]
+    rows_per_finding = [
+        {loc["row_index"] for loc in finding["test_occurrences"]} for finding in report["findings"]
+    ]
+    assert rows_per_finding == [{0}, {1}]
+    assert report["summary"]["blocking"]["rows"] == 1
+    assert report["summary"]["flagged"]["rows"] == 1
+
+
+def test_evidence_from_a_second_document_survives_deduplication(chembl):
+    # Regression: metoprolol is measured in document 2 as the free base and in
+    # document 1 as its hydrochloride. The exact match wins the row, so only
+    # one finding is reported, but the document summary must still count both
+    # papers: dropping one hides a publication that holds the answer.
+    report = search(chembl, [METOPROLOL_FREE_BASE])
+    assert matches(report) == [("inchikey", "explicit_id")]
+    assert {summary["document_chembl_id"] for summary in report["by_document"]} == {
+        CYP3A4_DOCUMENT,
+        CYP3A4_DOCUMENT_2,
+    }
+
+
+def test_an_activity_with_no_measured_result_is_not_a_leak(chembl):
+    # Regression: ChEMBL holds CYP3A4 rows with no value, e.g. "Not
+    # Determined". The endpoint was looked at, not measured, so no answer is
+    # exposed and the run must not be blocked.
+    report = search(chembl, [PARACETAMOL])
+    assert report["findings"] == []
+    assert report["summary"]["status"] == "PASS"
+    assert report["summary"]["total_found_in_source"] == 1
+
+
+def test_activity_is_cited_to_its_own_document_not_its_assays(chembl):
+    # Regression: ChEMBL lets an activity carry a doc_id different from its
+    # assay's. Citing the assay's document attributes the measurement to the
+    # wrong paper and miscounts document coverage.
+    report = search(chembl, [THEOPHYLLINE])
+    documents = {
+        activity["document_chembl_id"]
+        for finding in report["findings"]
+        for activity in finding["activities"]
+    }
+    assert documents == {CYP3A4_DOCUMENT_3}
+    assert [summary["document_chembl_id"] for summary in report["by_document"]] == [
+        CYP3A4_DOCUMENT_3
+    ]
+
+
+def test_release_is_chosen_by_name_not_by_row_order(chembl):
+    # Regression: the version table is keyed by name and need not hold only
+    # the database release. The fixture puts a non-ChEMBL row first, so taking
+    # whichever row comes first would report the wrong release.
+    conn = connect(chembl)
+    try:
+        names = {str(row[0]) for row in conn.execute("SELECT name FROM version")}
+        source = read_source(conn, chembl)
+    finally:
+        conn.close()
+    assert OTHER_VERSION_NAME in names, "fixture should hold a non-ChEMBL version row"
+    assert source["release"] == RELEASE_NAME
+
+
+def test_a_markup_like_report_path_does_not_break_the_dashboard(chembl, capsys):
+    # Regression: the path is interpolated into Rich markup, so one containing
+    # "[/]" would close the bold tag early and raise MarkupError.
+    report = search(chembl, [CAFFEINE])
+    print_public_search_summary(report, "out[/].json")
+    out = capsys.readouterr().out
+    assert "public-source search summary" in out
+    assert "out[/].json" in out

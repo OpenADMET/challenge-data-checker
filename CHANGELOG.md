@@ -30,6 +30,14 @@ All notable changes to this project are recorded here. The format follows
   - Available as `challenge-data-checker public-search`, with a
     `[public_search]` config section or equivalent flags, and as
     `search_public()` in the Python API.
+  - An activity with no measured result (e.g. "Not Determined") is not a
+    finding: the endpoint was looked at, not measured, so no answer is
+    exposed. Only numeric results count.
+  - A measurement is cited to the activity's own document, which ChEMBL
+    permits to differ from its assay's.
+  - Each test row is reported in exactly one finding (#4), while the
+    per-document summary reads every match, so a paper is never dropped
+    because another representation reported the same row.
   - Reports carry `"mode": "public_search"`.
 
 ## [0.4.0] - 2026-10-23

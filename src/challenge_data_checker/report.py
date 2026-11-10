@@ -35,6 +35,7 @@ from challenge_data_checker.models import MoleculeRecord
 from challenge_data_checker.public_search import (
     build_findings,
     build_presence,
+    collect_endpoint_matches,
     count_rows_found,
     group_matches,
     index_records,
@@ -1924,7 +1925,10 @@ def build_public_search_report(
         conn.close()
 
     resolved_ids = sorted({cid for ids in resolved.values() for cid in ids})
-    findings = build_findings(
+    # Collected once, then read two ways: reduced to one finding per test row
+    # for counting, and read in full for the document summary so no paper is
+    # dropped because another representation reported the same row.
+    endpoint_matches = collect_endpoint_matches(
         index,
         grouped,
         activities,
@@ -1933,8 +1937,9 @@ def build_public_search_report(
         resolved_target_chembl_ids=resolved_ids,
         standard_types=settings.standard_types,
     )
+    findings = build_findings(endpoint_matches)
     presence = build_presence(index, grouped)
-    by_document = summarise_documents(findings, len(records))
+    by_document = summarise_documents(endpoint_matches, len(records))
     status, blocking, flagged = summarise_tiers(collect_public_findings(findings), TierContext())
     return {
         "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
@@ -2252,7 +2257,7 @@ def print_public_search_summary(
         Rule("[bold cyan]challenge-data-checker public-source search summary[/]", style="cyan"),
         f"  Generated          : {report['generated_at']}",
         f"  Source             : ChEMBL [bold]{escape(release)}[/]"
-        + (f" ({src['release_date']})" if src["release_date"] else ""),
+        + (f" ({escape(src['release_date'])})" if src["release_date"] else ""),
         f"  Test rows          : [bold]{s['total_test_rows']}[/]  "
         f"distinct structures=[bold]{s['total_test_structures']}[/]",
         f"  Present in source  : [bold]{s['total_found_in_source']}[/] of "
@@ -2269,6 +2274,8 @@ def print_public_search_summary(
     )
     renderables.append(_status_rule(s))
     if report_output is not None:
-        renderables.append(f"Full detailed report written to: [bold]{report_output}[/]")
+        renderables.append(
+            f"Full detailed report written to: [bold]{escape(str(report_output))}[/]"
+        )
 
     Console(highlight=False).print(Group(*renderables))

@@ -385,6 +385,11 @@ strong the endpoint evidence is:
 | InChIKey connectivity block | a configured assay or target ID | `public_assay_stereo_overlap` | WARN |
 | any | target resolved from a name, plus an allowed `standard_type` | `public_target_type_overlap` | WARN |
 
+An activity with no measured result, such as a CYP3A4 endpoint recorded as
+"Not Determined", is not a finding either: the endpoint was looked at, not
+measured, so no answer is exposed. Only numeric results count, so a purely
+qualitative active/inactive record with no value is also skipped.
+
 Only a named assay or target on an exact or salt-form structure match
 blocks. Resolving a target from a name is a guess, and a connectivity-only
 match may be a deliberate stereo split, so both are flagged for a human
