@@ -233,6 +233,7 @@ def search_public(
     target_chembl_ids: Sequence[str] | None = None,
     target_names: Sequence[str] | None = None,
     standard_types: Sequence[str] | None = None,
+    target_types: Sequence[str] | None = None,
     match_connectivity: bool = False,
     smiles_column: str = "SMILES",
     identifier_columns: Sequence[str] | None = None,
@@ -273,6 +274,9 @@ def search_public(
         Allowed ``standard_type`` values for a ``target_names`` match
         (e.g. ``IC50``, ``Ki``), compared case-insensitively. Empty
         allows any.
+    target_types : Sequence[str] | None
+        ChEMBL ``target_type`` values a ``target_names`` entry may resolve
+        to. Defaults to single proteins only.
     match_connectivity : bool
         Whether to also match on the InChIKey connectivity block, catching
         differing or undefined stereochemistry. Off by default: it is the
@@ -322,6 +326,7 @@ def search_public(
                 "target_chembl_ids": list(target_chembl_ids) if target_chembl_ids else [],
                 "target_names": list(target_names) if target_names else [],
                 "standard_types": list(standard_types) if standard_types else [],
+                **({"target_types": list(target_types)} if target_types is not None else {}),
             }
         ),
         config_path=None,

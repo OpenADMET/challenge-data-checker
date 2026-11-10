@@ -373,6 +373,7 @@ target_chembl_ids = ["CHEMBL340"]        # CYP3A4; a match is blocking
 assay_chembl_ids = []                    # specific assays; a match is blocking
 target_names = ["CYP3A4"]                # resolved by name/gene symbol; flagged
 standard_types = ["IC50", "Ki", "Inhibition"]
+target_types = ["SINGLE PROTEIN"]        # what target_names may resolve to (default)
 match_connectivity = false               # also match ignoring stereochemistry
 ```
 
@@ -400,6 +401,8 @@ The report has `"mode": "public_search"`. Alongside the findings it carries
 `by_document`, which groups findings by their ChEMBL document: a single
 paper covering a large share of the test set is the strongest unblinding
 signal there is.
+
+`target_names` resolves to single-protein targets only unless `target_types` widens it. In ChEMBL 37 the gene symbol `CYP3A4` resolves to the single protein CHEMBL340 and also to three protein families, the broadest being every cytochrome P450 (CHEMBL4523986). Matching those would flag a CYP2D6 measurement recorded against the family as a CYP3A4 leak.
 
 `match_connectivity` is off by default because no index covers an InChIKey
 prefix, so that lookup scans `compound_structures` once. The exact and

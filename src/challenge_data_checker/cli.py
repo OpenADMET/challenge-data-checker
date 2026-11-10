@@ -430,6 +430,14 @@ def build_public_search_arg_parser() -> argparse.ArgumentParser:
         help="Allowed standard_type values for a --target-names match, e.g. IC50 Ki.",
     )
     data.add_argument(
+        "--target-types",
+        nargs="+",
+        help=(
+            "ChEMBL target types a --target-names entry may resolve to "
+            '(default: "SINGLE PROTEIN").'
+        ),
+    )
+    data.add_argument(
         "--match-connectivity",
         action="store_const",
         const=True,
@@ -463,6 +471,7 @@ _PUBLIC_SEARCH_DATA_FLAGS = (
     "target_chembl_ids",
     "target_names",
     "standard_types",
+    "target_types",
     "match_connectivity",
     "smiles_column",
     "identifier_columns",
@@ -523,6 +532,7 @@ def public_search_config_from_args(args: argparse.Namespace) -> PublicSearchConf
                 "target_chembl_ids": args.target_chembl_ids or [],
                 "target_names": args.target_names or [],
                 "standard_types": args.standard_types or [],
+                **({"target_types": args.target_types} if args.target_types else {}),
             }
         ),
         config_path=None,

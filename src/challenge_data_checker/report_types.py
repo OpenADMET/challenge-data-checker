@@ -618,6 +618,7 @@ class PublicSearchReportConfig(TypedDict):
     target_chembl_ids: list[str]
     target_names: list[str]
     standard_types: list[str]
+    target_types: list[str]
     report_format: str
 
 

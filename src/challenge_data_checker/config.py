@@ -546,6 +546,11 @@ class PublicSearchSettings:
         Allowed ``standard_type`` values (e.g. ``IC50``, ``Ki``,
         ``Inhibition``) for a ``target_names`` match, compared
         case-insensitively. Empty allows any type.
+    target_types : list[str]
+        ChEMBL ``target_type`` values a ``target_names`` entry may resolve
+        to. Defaults to single proteins only: a gene symbol such as CYP3A4
+        is also a component of protein-family targets, up to every
+        cytochrome P450 at once.
     """
 
     chembl_sqlite: str | Path
@@ -554,6 +559,7 @@ class PublicSearchSettings:
     target_chembl_ids: list[str] = field(default_factory=list)
     target_names: list[str] = field(default_factory=list)
     standard_types: list[str] = field(default_factory=list)
+    target_types: list[str] = field(default_factory=lambda: ["SINGLE PROTEIN"])
 
 
 @dataclass(frozen=True)
@@ -643,7 +649,17 @@ def parse_public_search(settings_raw: Mapping[str, object]) -> PublicSearchSetti
         target_chembl_ids=_optional_str_list(settings_raw, "target_chembl_ids", "public_search"),
         target_names=_optional_str_list(settings_raw, "target_names", "public_search"),
         standard_types=_optional_str_list(settings_raw, "standard_types", "public_search"),
+        target_types=(
+            _optional_str_list(settings_raw, "target_types", "public_search")
+            if "target_types" in settings_raw
+            else ["SINGLE PROTEIN"]
+        ),
     )
+    if not settings.target_types:
+        raise ConfigError(
+            "'target_types' in [public_search] must not be empty; omit it to keep the "
+            "default of single-protein targets only."
+        )
     if not (settings.assay_chembl_ids or settings.target_chembl_ids or settings.target_names):
         raise ConfigError(
             "[public_search] needs at least one of 'assay_chembl_ids', "

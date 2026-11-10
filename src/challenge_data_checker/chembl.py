@@ -21,6 +21,7 @@ list, which keeps every query to one statement regardless of test-set size.
 """
 
 import logging
+import re
 import sqlite3
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -47,6 +48,17 @@ REQUIRED_TABLES: tuple[str, ...] = (
     "assays",
     "target_dictionary",
 )
+
+# How a release names itself in its version table, e.g. "ChEMBL_37", and
+# how it describes itself, e.g. "ChEMBL Release 37 (https://...)".
+_RELEASE_NAME = re.compile(r"chembl_?\d+", re.IGNORECASE)
+_RELEASE_COMMENT = re.compile(r"chembl release \d+", re.IGNORECASE)
+
+# Target types a gene symbol resolves to unless the configuration widens it.
+# A symbol such as CYP3A4 is also a component of protein-family targets, the
+# broadest being every cytochrome P450 at once, so resolving to those would
+# flag a CYP2D6 measurement filed under the family as a CYP3A4 leak.
+DEFAULT_TARGET_TYPES: tuple[str, ...] = ("SINGLE PROTEIN",)
 
 # The length of an InChIKey's first block, which encodes connectivity only
 # and so is shared by stereoisomers and racemate/enantiomer pairs.
@@ -167,20 +179,23 @@ def read_source(conn: sqlite3.Connection, database_path: str | Path) -> ChemblSo
             database_path,
         )
         return source
-    # version is keyed by name and is not guaranteed to hold only the
-    # database release, so the ChEMBL row is preferred over whichever row
-    # happens to come first. Any row is better than none, hence the fallback.
+    # A real release's version table also lists the versions of the
+    # ontologies and tools it was built with (ChEMBL 37 has 11 rows, with the
+    # release third), and one of those, "ChEMBL_Structure_Pipeline 1.2.0",
+    # also starts with "ChEMBL". So the release row is matched by its exact
+    # name pattern, then by its comment, and only then by position.
     rows = conn.execute(f"SELECT {', '.join(wanted)} FROM version").fetchall()
     row = next(
-        (
-            candidate
-            for candidate in rows
-            if "name" in wanted
-            and candidate["name"] is not None
-            and str(candidate["name"]).upper().startswith("CHEMBL")
-        ),
-        rows[0] if rows else None,
+        (r for r in rows if "name" in wanted and _RELEASE_NAME.fullmatch(str(r["name"] or ""))),
+        None,
     )
+    if row is None and "comments" in wanted:
+        row = next(
+            (r for r in rows if _RELEASE_COMMENT.match(str(r["comments"] or ""))),
+            None,
+        )
+    if row is None and rows:
+        row = rows[0]
     if row is None:
         return source
     if "name" in wanted and row["name"] is not None:
@@ -376,12 +391,21 @@ def find_structures(
     return matches
 
 
-def resolve_target_names(conn: sqlite3.Connection, names: Sequence[str]) -> dict[str, list[str]]:
+def resolve_target_names(
+    conn: sqlite3.Connection,
+    names: Sequence[str],
+    target_types: Sequence[str] = DEFAULT_TARGET_TYPES,
+) -> dict[str, list[str]]:
     """Resolve target names or gene symbols to ChEMBL target IDs.
 
     Matching is case-insensitive against ``target_dictionary.pref_name``
     and, where the release has it, ``component_synonyms.component_synonym``,
     which is where gene symbols such as ``CYP3A4`` live.
+
+    Only targets of the given types are kept. In ChEMBL 37, ``CYP3A4``
+    resolves to the single protein CHEMBL340 and also to three protein
+    families, the broadest being every cytochrome P450, so the default is
+    single proteins only.
 
     Parameters
     ----------
@@ -389,6 +413,9 @@ def resolve_target_names(conn: sqlite3.Connection, names: Sequence[str]) -> dict
         An open connection, as returned by ``connect``.
     names : Sequence[str]
         The target names or gene symbols from the configuration.
+    target_types : Sequence[str]
+        ``target_dictionary.target_type`` values to keep, compared
+        case-insensitively. Defaults to ``DEFAULT_TARGET_TYPES``.
 
     Returns
     -------
@@ -403,26 +430,30 @@ def resolve_target_names(conn: sqlite3.Connection, names: Sequence[str]) -> dict
         str(row[0]) for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
     }
     has_synonyms = {"component_synonyms", "target_components"} <= tables
+    types = sorted({t.upper() for t in target_types})
+    placeholders = ", ".join("?" for _ in types)
     for name in names:
         found: set[str] = {
             str(row["chembl_id"])
             for row in conn.execute(
-                "SELECT chembl_id FROM target_dictionary WHERE LOWER(pref_name) = LOWER(?)",
-                (name,),
+                "SELECT chembl_id FROM target_dictionary WHERE LOWER(pref_name) = LOWER(?) "
+                f"AND UPPER(target_type) IN ({placeholders})",
+                (name, *types),
             )
         }
         if has_synonyms:
             found |= {
                 str(row["chembl_id"])
                 for row in conn.execute(
-                    """
+                    f"""
                     SELECT DISTINCT td.chembl_id AS chembl_id
                     FROM component_synonyms csyn
                     JOIN target_components tc ON tc.component_id = csyn.component_id
                     JOIN target_dictionary td ON td.tid = tc.tid
                     WHERE LOWER(csyn.component_synonym) = LOWER(?)
+                      AND UPPER(td.target_type) IN ({placeholders})
                     """,
-                    (name,),
+                    (name, *types),
                 )
             }
         resolved[name] = sorted(found)

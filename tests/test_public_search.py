@@ -8,6 +8,8 @@ from chembl_fixture import (
     CYP3A4_DOCUMENT_3,
     CYP3A4_TARGET,
     OTHER_VERSION_NAME,
+    P450_FAMILY_TARGET,
+    PIPELINE_VERSION_NAME,
     RELEASE_DATE,
     RELEASE_NAME,
     build_fixture,
@@ -44,6 +46,8 @@ PARACETAMOL = "CC(=O)Nc1ccc(O)cc1"
 METOPROLOL_FREE_BASE = "CC(C)NCC(O)COc1ccc(CCOC)cc1"
 # Its activity's own doc_id differs from its assay's.
 THEOPHYLLINE = "Cn1c(=O)c2[nH]cnc2n(C)c1=O"
+# Measured only against the whole P450 family target.
+NICOTINE = "CN1CCC[C@H]1c1cccnc1"
 # Not in the fixture at all: the negative control.
 OCTANOL = "CCCCCCCCO"
 
@@ -388,3 +392,48 @@ def test_a_markup_like_report_path_does_not_break_the_dashboard(chembl, capsys):
     out = capsys.readouterr().out
     assert "public-source search summary" in out
     assert "out[/].json" in out
+
+
+def test_release_is_not_confused_with_a_chembl_named_tool_version(chembl):
+    # Regression from real data: ChEMBL 37's version table has 11 rows and
+    # "ChEMBL_Structure_Pipeline 1.2.0" also starts with "ChEMBL". The fixture
+    # inserts it before the release row, so a prefix match would report the
+    # structure pipeline as the database release.
+    conn = connect(chembl)
+    try:
+        names = [str(row[0]) for row in conn.execute("SELECT name FROM version")]
+        source = read_source(conn, chembl)
+    finally:
+        conn.close()
+    assert names.index(PIPELINE_VERSION_NAME) < names.index(RELEASE_NAME)
+    assert source["release"] == RELEASE_NAME
+
+
+def test_gene_symbol_resolves_to_single_proteins_by_default(chembl):
+    # Regression from real data: in ChEMBL 37 "CYP3A4" also resolves to three
+    # protein families, the broadest being every cytochrome P450. Nicotine is
+    # measured only against that family, so it must not be flagged as CYP3A4.
+    report = search(chembl, [NICOTINE], target_chembl_ids=[], target_names=["CYP3A4"])
+    assert report["findings"] == []
+    assert report["summary"]["status"] == "PASS"
+    assert report["config"]["target_types"] == ["SINGLE PROTEIN"]
+
+
+def test_target_types_can_be_widened_to_protein_families(chembl):
+    report = search(
+        chembl,
+        [NICOTINE],
+        target_chembl_ids=[],
+        target_names=["CYP3A4"],
+        target_types=["SINGLE PROTEIN", "PROTEIN FAMILY"],
+    )
+    assert matches(report) == [("inchikey", "target_type")]
+    targets = {a["target_chembl_id"] for f in report["findings"] for a in f["activities"]}
+    assert targets == {P450_FAMILY_TARGET}
+
+
+def test_config_rejects_empty_target_types():
+    with pytest.raises(ConfigError, match="target_types"):
+        parse_public_search(
+            {"chembl_sqlite": "c.sqlite", "target_names": ["CYP3A4"], "target_types": []}
+        )

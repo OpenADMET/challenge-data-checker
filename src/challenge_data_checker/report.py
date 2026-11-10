@@ -1916,7 +1916,7 @@ def build_public_search_report(
         )
         matches = find_structures(conn, lookup_keys(index))
         grouped = group_matches(matches)
-        resolved = resolve_target_names(conn, settings.target_names)
+        resolved = resolve_target_names(conn, settings.target_names, settings.target_types)
         activities = find_activities(
             conn,
             (compound["molregno"] for compounds in grouped.values() for compound in compounds),
@@ -1959,6 +1959,7 @@ def build_public_search_report(
             "target_chembl_ids": settings.target_chembl_ids,
             "target_names": settings.target_names,
             "standard_types": settings.standard_types,
+            "target_types": settings.target_types,
             "report_format": config.settings.report_format,
         },
         "summary": {
@@ -2132,6 +2133,7 @@ def _format_public_search_report_as_text(report: PublicSearchReport) -> str:
         f"  target_chembl_ids        : {cfg['target_chembl_ids']}",
         f"  target_names             : {cfg['target_names']}",
         f"  standard_types           : {cfg['standard_types']}",
+        f"  target_types             : {cfg['target_types']}",
         "",
         "=" * 60,
         "challenge-data-checker public-source search summary",

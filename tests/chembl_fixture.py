@@ -46,6 +46,17 @@ CYP3A4_DOCUMENT_3 = "CHEMBL_DOC_3"
 # database release, so a non-ChEMBL row is included, first, to prove the
 # release is chosen by name rather than by row order.
 OTHER_VERSION_NAME = "aa_ontology"
+# Real releases also list the structure pipeline they used, under a name that
+# starts with "ChEMBL" too (ChEMBL 37: "ChEMBL_Structure_Pipeline 1.2.0"). It
+# is inserted before the release row, so matching on a "ChEMBL" prefix picks
+# it instead of the release.
+PIPELINE_VERSION_NAME = "ChEMBL_Structure_Pipeline 1.2.0"
+
+# A protein-family target that has CYP3A4 among its components, as the
+# real "Cytochrome P450" family (CHEMBL4523986) does. Resolving the gene
+# symbol CYP3A4 to it would sweep in every P450.
+P450_FAMILY_TARGET = "CHEMBL4523986"
+P450_FAMILY_ASSAY = "CHEMBL_ASSAY_P450"
 
 # Compounds, as (molregno, chembl_id, smiles, parent_molregno).
 #
@@ -69,6 +80,7 @@ COMPOUNDS: tuple[tuple[int, str, str, int], ...] = (
     (7, "CHEMBL13", "CC(C)NCC(O)COc1ccc(CCOC)cc1", 7),
     (8, "CHEMBL1200619", "CC(C)NCC(O)COc1ccc(CCOC)cc1.Cl", 7),
     (9, "CHEMBL190", "Cn1c(=O)c2[nH]cnc2n(C)c1=O", 9),
+    (10, "CHEMBL3", "CN1CCC[C@H]1c1cccnc1", 10),
 )
 
 # Activities, as (molregno, assay, standard_type, value, own doc_id or None to
@@ -93,6 +105,8 @@ ACTIVITIES: tuple[tuple[int, str, str, float | None, int | None], ...] = (
     (7, CYP3A4_ASSAY_2, "IC50", 61.0, None),
     (8, CYP3A4_ASSAY, "IC50", 72.0, None),
     (9, CYP3A4_ASSAY_3, "IC50", 88.0, 3),
+    # 10 nicotine - measured only against the whole P450 family target
+    (10, P450_FAMILY_ASSAY, "IC50", 50.0, None),
 )
 
 _SCHEMA = """
@@ -206,6 +220,10 @@ def build_fixture(path: str | Path) -> Path:
         )
         conn.execute(
             "INSERT INTO version (name, creation_date, comments) VALUES (?, ?, ?)",
+            (PIPELINE_VERSION_NAME, None, "structure pipeline version, not the release"),
+        )
+        conn.execute(
+            "INSERT INTO version (name, creation_date, comments) VALUES (?, ?, ?)",
             (RELEASE_NAME, RELEASE_DATE, "test fixture"),
         )
         for molregno, chembl_id, smiles, parent in COMPOUNDS:
@@ -246,6 +264,15 @@ def build_fixture(path: str | Path) -> Path:
                 "INSERT INTO target_components (tid, component_id) VALUES (?, ?)", (tid, tid)
             )
 
+        # The family shares CYP3A4's component (component_id 1), so the gene
+        # symbol resolves to it as well as to the single protein.
+        conn.execute(
+            """INSERT INTO target_dictionary (tid, chembl_id, pref_name, target_type, organism)
+               VALUES (?, ?, ?, ?, ?)""",
+            (3, P450_FAMILY_TARGET, "Cytochrome P450", "PROTEIN FAMILY", "Homo sapiens"),
+        )
+        conn.execute("INSERT INTO target_components (tid, component_id) VALUES (?, ?)", (3, 1))
+
         documents = {
             CYP3A4_DOCUMENT: (1, "J Med Chem", 2019, "10.0000/fixture", "A CYP3A4 panel"),
             CYP3A4_DOCUMENT_2: (2, "J Pharm Sci", 2021, "10.0000/fixture2", "Another panel"),
@@ -263,6 +290,7 @@ def build_fixture(path: str | Path) -> Path:
             KINASE_ASSAY: (2, 2, None),
             CYP3A4_ASSAY_2: (3, 1, 2),
             CYP3A4_ASSAY_3: (4, 1, 1),
+            P450_FAMILY_ASSAY: (5, 3, 1),
         }
         for chembl_id, (assay_id, tid, doc_id) in assays.items():
             conn.execute(

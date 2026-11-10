@@ -38,6 +38,12 @@ All notable changes to this project are recorded here. The format follows
   - Each test row is reported in exactly one finding (#4), while the
     per-document summary reads every match, so a paper is never dropped
     because another representation reported the same row.
+  - `target_names` resolves to single-protein targets by default;
+    `target_types` widens it. In ChEMBL 37, `CYP3A4` also resolves to three
+    protein families, up to every cytochrome P450.
+  - The release is read from the `version` row named like `ChEMBL_37`.
+    Real releases list their tool versions there too, including one that
+    also starts with "ChEMBL".
   - Reports carry `"mode": "public_search"`.
 
 ## [0.4.0] - 2026-10-23

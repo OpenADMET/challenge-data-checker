@@ -99,7 +99,9 @@ report = search_public("data/blinded_test.csv", chembl_sqlite="/data/chembl_35.d
 
 Name the endpoint with at least one of `--assay-chembl-ids`,
 `--target-chembl-ids` (both blocking on a match) or `--target-names`
-(resolved from a name or gene symbol, so only flagged). Add
+(resolved from a name or gene symbol, so only flagged; it resolves to
+single-protein targets unless `--target-types` widens it, since a symbol
+such as CYP3A4 is also part of family targets covering every P450). Add
 `--match-connectivity` to also match ignoring stereochemistry; it is off by
 default because it is the slowest lookup.
 
