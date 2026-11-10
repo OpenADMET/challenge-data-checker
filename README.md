@@ -31,6 +31,13 @@ issues. Built for sequential processing of datasets up to ~10,000 molecules.
   InChIKey, or any configured identifier column. Stereoisomers and
   racemate/enantiomer pairs (same InChIKey connectivity block, different
   stereo) are reported separately as stereo-only overlap.
+- **Public-source search**: the `public-search` command asks whether a
+  blinded test set is *already public*, by looking it up in a local ChEMBL
+  release. A test compound merely appearing in ChEMBL is not leakage, so a
+  finding needs a public record that measures the challenge's own endpoint.
+  Salt forms are matched through ChEMBL's `molecule_hierarchy`, and
+  stereochemistry differences through the InChIKey connectivity block. The
+  report cites the release it searched, so it can be reproduced.
 - **Tanimoto similarity fallback**: bulk pairwise Tanimoto comparison between
   every train/test fingerprint pair (via RDKit's `BulkTanimotoSimilarity`) to
   catch near-duplicates. Pairs already reported as an exact or stereo-only
@@ -311,6 +318,87 @@ combined with them. Settings that only make sense for a split
 check config. Passing an audit config to `check`, or a check config to the
 audit, is an error that tells you which command to use. The report has
 `"mode": "check"`, and its rows are in the pool `"dataset"`.
+
+### Searching public data sources
+
+A blind challenge's test set can already be public without the organisers
+knowing: the measurements may have been published and curated into ChEMBL.
+`public-search` looks the test set up in a **local** ChEMBL release and
+reports what it finds.
+
+A local release is used rather than the REST API for two reasons. The test
+set is the one thing a blind challenge means to keep secret, and sending its
+InChIKeys to a public endpoint discloses exactly that. And a release number
+makes the report reproducible: a live query against a database that changes
+underneath you can be repeated but not reproduced. Only `sqlite3` from the
+standard library is needed, so this adds no dependency.
+
+Presence in ChEMBL is **not** a finding. Most drug-like compounds appear
+somewhere, so presence is reported as a count ("N of M test rows present")
+and a list, while a finding needs a public record measuring the challenge
+endpoint. Say what that endpoint is with at least one of
+`assay_chembl_ids`, `target_chembl_ids` or `target_names`.
+
+```bash
+challenge-data-checker public-search --config public.toml
+
+# or entirely with flags
+challenge-data-checker public-search --test-files data/blinded_test.csv \
+    --chembl-sqlite /data/chembl_35.db --target-chembl-ids CHEMBL340 \
+    --standard-types IC50 Ki --report-output reports/public.json
+```
+
+```python
+from challenge_data_checker import search_public
+
+report = search_public("data/blinded_test.csv", chembl_sqlite="/data/chembl_35.db",
+                       target_chembl_ids=["CHEMBL340"], standard_types=["IC50", "Ki"])
+```
+
+```toml
+[paths]
+test_files = ["data/blinded_test.csv"]
+report_output = "reports/public_search.json"   # optional
+
+[columns]
+smiles_column = "SMILES"
+identifier_columns = ["compound_id"]
+
+[settings]
+strip_salts = true          # also match a compound by its salt-stripped parent
+
+[public_search]
+chembl_sqlite = "/data/chembl_35/chembl_35_sqlite/chembl_35.db"
+target_chembl_ids = ["CHEMBL340"]        # CYP3A4; a match is blocking
+assay_chembl_ids = []                    # specific assays; a match is blocking
+target_names = ["CYP3A4"]                # resolved by name/gene symbol; flagged
+standard_types = ["IC50", "Ki", "Inhibition"]
+match_connectivity = false               # also match ignoring stereochemistry
+```
+
+How a match is tiered depends on both how the structure matched and how
+strong the endpoint evidence is:
+
+| Structure match | Endpoint evidence | Finding type | Tier |
+|---|---|---|---|
+| InChIKey, or salt-stripped parent | a configured assay or target ID | `public_assay_overlap` | FAIL |
+| InChIKey connectivity block | a configured assay or target ID | `public_assay_stereo_overlap` | WARN |
+| any | target resolved from a name, plus an allowed `standard_type` | `public_target_type_overlap` | WARN |
+
+Only a named assay or target on an exact or salt-form structure match
+blocks. Resolving a target from a name is a guess, and a connectivity-only
+match may be a deliberate stereo split, so both are flagged for a human
+instead. This is the audit's rule 3 applied to a public source. Use
+`--strict` to make flagged findings fail too.
+
+The report has `"mode": "public_search"`. Alongside the findings it carries
+`by_document`, which groups findings by their ChEMBL document: a single
+paper covering a large share of the test set is the strongest unblinding
+signal there is.
+
+`match_connectivity` is off by default because no index covers an InChIKey
+prefix, so that lookup scans `compound_structures` once. The exact and
+salt-form lookups are indexed and fast.
 
 ### Using it from an AI agent
 

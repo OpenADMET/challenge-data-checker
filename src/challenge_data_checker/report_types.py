@@ -462,3 +462,177 @@ class CheckReport(TypedDict):
     internal_duplicates: InternalDuplicates
     identifier_namespace_issues: dict[str, NamespaceIssues]
     quality_flags: QualityFlags
+
+
+# ---------------------------------------------------------------------------
+# Public-source search (``public-search`` mode, #18)
+# ---------------------------------------------------------------------------
+
+# The structural representations the public-source lookup matches on. These
+# are a subset of ``REPRESENTATIONS``: matching a public database on raw or
+# canonical SMILES adds nothing over the InChIKey, which is what public
+# databases are indexed by.
+PUBLIC_SEARCH_REPRESENTATIONS: tuple[Representation, ...] = (
+    "inchikey",
+    "parent_inchikey",
+    "inchikey_connectivity",
+)
+
+# How strong the evidence is that a matched public record measures the
+# challenge's own endpoint. ``explicit_id`` means the configuration named
+# that ChEMBL assay or target outright; ``target_type`` means the target was
+# resolved from a name or gene symbol and the measurement type is one of the
+# configured ones, which is weaker and so never blocks.
+type PublicMatchType = Literal["explicit_id", "target_type"]
+PUBLIC_MATCH_TYPES: tuple[PublicMatchType, ...] = ("explicit_id", "target_type")
+
+
+class ChemblSource(TypedDict):
+    """Which ChEMBL release the search ran against, for reproducibility.
+
+    ``release`` and ``release_date`` come from the release's own ``version``
+    table, so a report records the data it was produced from rather than
+    only the date it was produced.
+    """
+
+    database_path: str
+    release: str | None
+    release_date: str | None
+    comments: str | None
+
+
+class ChemblCompound(TypedDict):
+    """One ChEMBL compound a test structure matched.
+
+    ``parent_molregno`` is the compound's parent in ``molecule_hierarchy``,
+    which is the same as ``molregno`` for a compound that is already its own
+    parent. A salt and its free base share a parent, which is how a
+    ``parent_inchikey`` match reaches every salt form of one compound.
+    """
+
+    molregno: int
+    parent_molregno: int | None
+    chembl_id: str | None
+    standard_inchi_key: str | None
+
+
+class ChemblActivity(TypedDict):
+    """One measured activity record attached to a matched ChEMBL compound."""
+
+    assay_chembl_id: str | None
+    assay_description: str | None
+    target_chembl_id: str | None
+    target_name: str | None
+    organism: str | None
+    standard_type: str | None
+    standard_relation: str | None
+    standard_value: float | None
+    standard_units: str | None
+    pchembl_value: float | None
+    document_chembl_id: str | None
+    document_reference: str | None
+
+
+class PublicCompoundPresence(TypedDict):
+    """A test structure present in the public source, with no endpoint claim.
+
+    Presence alone is reported as a count, never as a finding: most
+    drug-like compounds appear in ChEMBL somewhere, so flagging presence
+    would bury the real signal in false positives.
+    """
+
+    value: str
+    representation: Representation
+    test_occurrences: list[Location]
+    chembl_ids: list[str]
+
+
+class PublicLeakageFinding(TypedDict):
+    """A test structure whose public record measures the challenge endpoint.
+
+    Attributes
+    ----------
+    value : str
+        The matched representation's value (an InChIKey, a parent
+        InChIKey, or a 14-character connectivity block).
+    representation : Representation
+        Which representation matched, from
+        ``PUBLIC_SEARCH_REPRESENTATIONS``.
+    match_type : PublicMatchType
+        How the endpoint was established, from ``PUBLIC_MATCH_TYPES``.
+    test_occurrences : list[Location]
+        The test rows holding this structure.
+    compounds : list[ChemblCompound]
+        The ChEMBL compounds it matched.
+    activities : list[ChemblActivity]
+        The activity records that established the endpoint match.
+    """
+
+    value: str
+    representation: Representation
+    match_type: PublicMatchType
+    test_occurrences: list[Location]
+    compounds: list[ChemblCompound]
+    activities: list[ChemblActivity]
+
+
+class PublicDocumentSummary(TypedDict):
+    """How much of the test set one publication or deposition covers.
+
+    A single document covering a large share of the test set is the
+    strongest unblinding signal the search can produce: it means the
+    challenge's answers are in one paper.
+    """
+
+    document_chembl_id: str
+    reference: str | None
+    test_rows: int
+    fraction_of_test_set: float
+
+
+class PublicSearchSummary(TypedDict):
+    """Headline counts for a public-source search."""
+
+    status: Status
+    blocking: TierSummary
+    flagged: TierSummary
+    total_test_rows: int
+    total_test_structures: int
+    total_found_in_source: int
+    total_findings_by_match_type: dict[str, int]
+    total_findings_by_representation: dict[str, int]
+    total_documents: int
+
+
+class PublicSearchReportConfig(TypedDict):
+    """The configuration echoed back into a public-search report."""
+
+    test_files: list[str]
+    smiles_column: str
+    resolved_smiles_columns: dict[str, str]
+    identifier_columns: list[str]
+    tautomer_standardisation: bool
+    strip_salts: bool
+    match_connectivity: bool
+    assay_chembl_ids: list[str]
+    target_chembl_ids: list[str]
+    target_names: list[str]
+    standard_types: list[str]
+    report_format: str
+
+
+class PublicSearchReport(TypedDict):
+    """The report of a public-source search for a blinded test set.
+
+    Unlike an audit, there is no training pool: the test set is compared
+    against a public database, so every row in a finding is a test row.
+    """
+
+    generated_at: str
+    mode: Literal["public_search"]
+    source: ChemblSource
+    config: PublicSearchReportConfig
+    summary: PublicSearchSummary
+    findings: list[PublicLeakageFinding]
+    presence: list[PublicCompoundPresence]
+    by_document: list[PublicDocumentSummary]

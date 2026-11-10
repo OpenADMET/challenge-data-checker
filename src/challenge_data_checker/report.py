@@ -22,9 +22,25 @@ from challenge_data_checker.checks import (
     train_test_leakage,
     unparseable_entries,
 )
-from challenge_data_checker.config import CheckConfig, Config
+from challenge_data_checker.chembl import (
+    connect,
+    find_activities,
+    find_structures,
+    read_source,
+    resolve_target_names,
+)
+from challenge_data_checker.config import CheckConfig, Config, PublicSearchConfig
 from challenge_data_checker.io_utils import describe_source
 from challenge_data_checker.models import MoleculeRecord
+from challenge_data_checker.public_search import (
+    build_findings,
+    build_presence,
+    count_rows_found,
+    group_matches,
+    index_records,
+    lookup_keys,
+    summarise_documents,
+)
 from challenge_data_checker.report_types import (
     EXACT_REPRESENTATIONS,
     QUALITY_FLAG_CATEGORIES,
@@ -33,6 +49,7 @@ from challenge_data_checker.report_types import (
     STEREO_INSENSITIVE_REPRESENTATIONS,
     CheckReport,
     CheckSummary,
+    ChemblActivity,
     InconsistentSmiles,
     InternalDuplicates,
     LeakageFinding,
@@ -40,6 +57,11 @@ from challenge_data_checker.report_types import (
     NamespaceIssueCounts,
     NamespaceIssues,
     PerPool,
+    PublicCompoundPresence,
+    PublicDocumentSummary,
+    PublicLeakageFinding,
+    PublicSearchReport,
+    PublicSearchSummary,
     QualityFlags,
     Report,
     Summary,
@@ -52,11 +74,19 @@ from challenge_data_checker.severity import (
     Severity,
     TierContext,
     collect_findings,
+    collect_public_findings,
     duplicate_finding_type,
     leakage_finding_type,
+    public_finding_type,
     severity_of,
     summarise_tiers,
 )
+
+# Every mode's summary carries the same status and tier counts, so the
+# helpers that render only those accept any of them.
+type AnySummary = Summary | CheckSummary | PublicSearchSummary
+# Likewise for the whole report, where only the mode and generated_at are read.
+type AnyReport = Report | CheckReport | PublicSearchReport
 
 
 def quality_flag_entries(records: list[MoleculeRecord]) -> QualityFlags:
@@ -515,18 +545,16 @@ def build_report(
     }
 
 
-def save_report(
-    report: Report | CheckReport, output_path: str | Path, report_format: str = "json"
-) -> None:
+def save_report(report: AnyReport, output_path: str | Path, report_format: str = "json") -> None:
     """Write the report to disk as either indented JSON or human-readable text.
 
     Creates any missing parent directories of ``output_path``.
 
     Parameters
     ----------
-    report : Report | CheckReport
-        The report dict, as returned by ``build_report`` or
-        ``build_check_report``.
+    report : AnyReport
+        The report dict, as returned by ``build_report``,
+        ``build_check_report`` or ``build_public_search_report``.
     output_path : str | Path
         Path to write the report to.
     report_format : str
@@ -569,14 +597,17 @@ def _fmt_counts(counts: Mapping[str, object]) -> str:
     return ", ".join(f"{k}={v}" for k, v in counts.items())
 
 
-def _tier_context(report: Report | CheckReport) -> TierContext:
+def _tier_context(report: AnyReport) -> TierContext:
     """Rebuild the settings that finding tiers depend on from a report.
+
+    Only the audit has a setting a tier depends on (its Tanimoto
+    threshold); the other modes use the defaults.
 
     Parameters
     ----------
-    report : Report | CheckReport
-        The report dict, as returned by ``build_report`` or
-        ``build_check_report``.
+    report : AnyReport
+        The report dict, as returned by ``build_report``,
+        ``build_check_report`` or ``build_public_search_report``.
 
     Returns
     -------
@@ -585,18 +616,20 @@ def _tier_context(report: Report | CheckReport) -> TierContext:
     """
     if report["mode"] == "check":
         return TierContext()
+    if report["mode"] == "public_search":
+        return TierContext()
     return TierContext(report["config"]["max_train_test_similarity"])
 
 
 _TIER_LABELS = {Severity.FAIL: "Blocking (FAIL)", Severity.WARN: "Flagged (WARN)"}
 
 
-def _tier_breakdown_lines(s: Summary | CheckSummary) -> list[str]:
+def _tier_breakdown_lines(s: AnySummary) -> list[str]:
     """Build the text lines summarising findings by severity tier.
 
     Parameters
     ----------
-    s : Summary | CheckSummary
+    s : AnySummary
         The report's ``"summary"`` dict.
 
     Returns
@@ -817,12 +850,12 @@ def _section_renderables(title: str, table: Table | None) -> list[RenderableType
     return [f"[bold cyan]{title}[/]", table if table is not None else placeholder, ""]
 
 
-def _severity_table(s: Summary | CheckSummary) -> Table | None:
+def _severity_table(s: AnySummary) -> Table | None:
     """Build the findings-by-severity table.
 
     Parameters
     ----------
-    s : Summary | CheckSummary
+    s : AnySummary
         The report's ``"summary"`` dict.
 
     Returns
@@ -1066,12 +1099,12 @@ def _quality_table(counts: Mapping[Pool, Mapping[str, int]], context: TierContex
     return table
 
 
-def _status_rule(s: Summary | CheckSummary) -> Rule:
+def _status_rule(s: AnySummary) -> Rule:
     """Build the overall PASS / WARN / FAIL banner.
 
     Parameters
     ----------
-    s : Summary | CheckSummary
+    s : AnySummary
         The report's ``"summary"`` dict.
 
     Returns
@@ -1564,8 +1597,8 @@ def _quality_flag_lines(quality_flags: QualityFlags, pool: Pool) -> list[str]:
     return lines
 
 
-def format_report_as_text(report: Report | CheckReport) -> str:
-    """Render a full audit or check report as human-readable, indented plain text.
+def format_report_as_text(report: AnyReport) -> str:
+    """Render a full report as human-readable, indented plain text.
 
     Contains the same findings as the JSON report (exact row indices, source
     files, values, and similarity scores) rendered as prose instead of raw
@@ -1573,9 +1606,9 @@ def format_report_as_text(report: Report | CheckReport) -> str:
 
     Parameters
     ----------
-    report : Report | CheckReport
-        The report dict, as returned by ``build_report`` or
-        ``build_check_report``.
+    report : AnyReport
+        The report dict, as returned by ``build_report``,
+        ``build_check_report`` or ``build_public_search_report``.
 
     Returns
     -------
@@ -1584,6 +1617,8 @@ def format_report_as_text(report: Report | CheckReport) -> str:
     """
     if report["mode"] == "check":
         return _format_check_report_as_text(report)
+    if report["mode"] == "public_search":
+        return _format_public_search_report_as_text(report)
     return _format_audit_report_as_text(report)
 
 
@@ -1829,3 +1864,411 @@ def _format_audit_report_as_text(report: Report) -> str:
     )
 
     return "\n".join(lines).rstrip() + "\n"
+
+
+def build_public_search_report(
+    config: PublicSearchConfig,
+    records: list[MoleculeRecord],
+    identifier_columns: list[str],
+    resolved_smiles_columns: dict[str, str] | None = None,
+) -> PublicSearchReport:
+    """Search a public source for the test set and assemble a report.
+
+    Opens the configured ChEMBL release read-only, looks the test
+    structures up by InChIKey, salt-stripped parent and (when enabled)
+    InChIKey connectivity block, then decides for each match whether the
+    public record measures the challenge's own endpoint.
+
+    A ``chembl.ChemblSourceError`` (a ``ValueError``, so the CLI reports it
+    as a configuration error) propagates if the release is missing,
+    unreadable, or lacks the tables the search needs.
+
+    Parameters
+    ----------
+    config : PublicSearchConfig
+        The validated public-search configuration.
+    records : list[MoleculeRecord]
+        Processed records of the test set (pool ``"test"``).
+    identifier_columns : list[str]
+        Identifier columns present in the test set, echoed into the
+        report. The public lookup is structural, so these aren't matched
+        on.
+    resolved_smiles_columns : dict[str, str] | None
+        The SMILES column actually resolved for each source. Defaults to
+        an empty mapping.
+
+    Returns
+    -------
+    PublicSearchReport
+        The report dict: the release searched, the echoed config, a
+        summary of counts, the findings, the presence list and the
+        per-document breakdown.
+    """
+    settings = config.public_search
+    conn = connect(settings.chembl_sqlite)
+    try:
+        source = read_source(conn, settings.chembl_sqlite)
+        index = index_records(
+            records,
+            strip_salts=config.settings.strip_salts,
+            match_connectivity=settings.match_connectivity,
+        )
+        matches = find_structures(conn, lookup_keys(index))
+        grouped = group_matches(matches)
+        resolved = resolve_target_names(conn, settings.target_names)
+        activities = find_activities(
+            conn,
+            (compound["molregno"] for compounds in grouped.values() for compound in compounds),
+        )
+    finally:
+        conn.close()
+
+    resolved_ids = sorted({cid for ids in resolved.values() for cid in ids})
+    findings = build_findings(
+        index,
+        grouped,
+        activities,
+        assay_chembl_ids=settings.assay_chembl_ids,
+        target_chembl_ids=settings.target_chembl_ids,
+        resolved_target_chembl_ids=resolved_ids,
+        standard_types=settings.standard_types,
+    )
+    presence = build_presence(index, grouped)
+    by_document = summarise_documents(findings, len(records))
+    status, blocking, flagged = summarise_tiers(collect_public_findings(findings), TierContext())
+    return {
+        "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "mode": "public_search",
+        "source": source,
+        "config": {
+            "test_files": [
+                describe_source(src, i) for i, src in enumerate(config.paths.test_files)
+            ],
+            "smiles_column": config.columns.smiles_column,
+            "resolved_smiles_columns": resolved_smiles_columns or {},
+            "identifier_columns": identifier_columns,
+            "tautomer_standardisation": config.settings.tautomer_standardisation,
+            "strip_salts": config.settings.strip_salts,
+            "match_connectivity": settings.match_connectivity,
+            "assay_chembl_ids": settings.assay_chembl_ids,
+            "target_chembl_ids": settings.target_chembl_ids,
+            "target_names": settings.target_names,
+            "standard_types": settings.standard_types,
+            "report_format": config.settings.report_format,
+        },
+        "summary": {
+            "status": status,
+            "blocking": blocking,
+            "flagged": flagged,
+            "total_test_rows": len(records),
+            "total_test_structures": len({r.inchikey for r in records if r.inchikey}),
+            "total_found_in_source": count_rows_found(index, grouped),
+            "total_findings_by_match_type": dict(
+                Counter(finding["match_type"] for finding in findings)
+            ),
+            "total_findings_by_representation": dict(
+                Counter(finding["representation"] for finding in findings)
+            ),
+            "total_documents": len(by_document),
+        },
+        "findings": findings,
+        "presence": presence,
+        "by_document": by_document,
+    }
+
+
+def _fmt_activity(activity: ChemblActivity) -> str:
+    """Format one ChEMBL activity record as a single review line.
+
+    Parameters
+    ----------
+    activity : ChemblActivity
+        The activity to format.
+
+    Returns
+    -------
+    str
+        The measurement, its target and assay, and its source document.
+    """
+    measurement = activity["standard_type"] or "?"
+    if activity["standard_value"] is not None:
+        relation = activity["standard_relation"] or "="
+        units = f" {activity['standard_units']}" if activity["standard_units"] else ""
+        measurement += f" {relation} {activity['standard_value']:g}{units}"
+    parts = [measurement]
+    target = activity["target_chembl_id"] or activity["target_name"]
+    if target:
+        name = activity["target_name"]
+        parts.append(f"target={target}" + (f" ({name})" if name and target != name else ""))
+    if activity["assay_chembl_id"]:
+        parts.append(f"assay={activity['assay_chembl_id']}")
+    if activity["document_chembl_id"]:
+        document = activity["document_chembl_id"]
+        reference = activity["document_reference"]
+        parts.append(f"doc={document}" + (f" ({reference})" if reference else ""))
+    return "; ".join(parts)
+
+
+def _public_finding_lines(
+    findings: Sequence[PublicLeakageFinding], context: TierContext
+) -> list[str]:
+    """Render the public-source findings with their rows and evidence.
+
+    Parameters
+    ----------
+    findings : Sequence[PublicLeakageFinding]
+        The report's ``findings``.
+    context : TierContext
+        The settings finding tiers depend on.
+
+    Returns
+    -------
+    list[str]
+        One block per finding: the matched value and how it matched, the
+        test rows, the ChEMBL compounds, and the activities behind it.
+    """
+    lines: list[str] = []
+    for finding in findings:
+        finding_type = public_finding_type(finding["representation"], finding["match_type"])
+        tag = _tag(finding_type, None, context)
+        lines.append(
+            f"  {tag} {escape(finding['value'])} "
+            f"[{finding['representation']}, {finding['match_type']}]"
+        )
+        chembl_ids = ", ".join(
+            compound["chembl_id"] or str(compound["molregno"]) for compound in finding["compounds"]
+        )
+        lines.append(f"      ChEMBL: {chembl_ids}")
+        lines.extend(_fmt_locations(finding["test_occurrences"]))
+        for activity in finding["activities"]:
+            lines.append(f"      - {escape(_fmt_activity(activity))}")
+    return lines
+
+
+def _public_document_lines(by_document: Sequence[PublicDocumentSummary]) -> list[str]:
+    """Render the per-document share of the test set.
+
+    Parameters
+    ----------
+    by_document : Sequence[PublicDocumentSummary]
+        The report's ``by_document``.
+
+    Returns
+    -------
+    list[str]
+        One line per document, largest share first.
+    """
+    return [
+        f"  {summary['document_chembl_id']}: {summary['test_rows']} test row(s), "
+        f"{summary['fraction_of_test_set']:.1%} of the test set"
+        + (f" - {escape(summary['reference'])}" if summary["reference"] else "")
+        for summary in by_document
+    ]
+
+
+def _public_presence_lines(presence: Sequence[PublicCompoundPresence]) -> list[str]:
+    """Render the test structures merely present in the public source.
+
+    Parameters
+    ----------
+    presence : Sequence[PublicCompoundPresence]
+        The report's ``presence``.
+
+    Returns
+    -------
+    list[str]
+        One line per present structure, with the ChEMBL IDs it matched.
+    """
+    return [
+        f"  {escape(entry['value'])} [{entry['representation']}]: "
+        f"{', '.join(entry['chembl_ids']) or '(no ChEMBL ID)'}"
+        for entry in presence
+    ]
+
+
+def _format_public_search_report_as_text(report: PublicSearchReport) -> str:
+    """Render a public-source search report as plain text.
+
+    Parameters
+    ----------
+    report : PublicSearchReport
+        The report dict, as returned by ``build_public_search_report``.
+
+    Returns
+    -------
+    str
+        The full text report as a single string.
+    """
+    cfg = report["config"]
+    src = report["source"]
+    s = report["summary"]
+    context = _tier_context(report)
+    lines = [
+        "=" * 72,
+        "challenge-data-checker public-source search report",
+        "=" * 72,
+        f"Generated: {report['generated_at']}",
+        "",
+        "Source",
+        "------",
+        f"  database_path            : {src['database_path']}",
+        f"  release                  : {src['release'] or '(unknown)'}",
+        f"  release_date             : {src['release_date'] or '(unknown)'}",
+        "",
+        "Configuration",
+        "-------------",
+        f"  test_files               : {cfg['test_files']}",
+        f"  smiles_column            : {cfg['smiles_column']}",
+        f"  identifier_columns       : {cfg['identifier_columns']}",
+        f"  tautomer_standardisation : {cfg['tautomer_standardisation']}",
+        f"  strip_salts              : {cfg['strip_salts']}",
+        f"  match_connectivity       : {cfg['match_connectivity']}",
+        f"  assay_chembl_ids         : {cfg['assay_chembl_ids']}",
+        f"  target_chembl_ids        : {cfg['target_chembl_ids']}",
+        f"  target_names             : {cfg['target_names']}",
+        f"  standard_types           : {cfg['standard_types']}",
+        "",
+        "=" * 60,
+        "challenge-data-checker public-source search summary",
+        "=" * 60,
+        *_tier_breakdown_lines(s),
+        "",
+        f"Test rows                 : {s['total_test_rows']}",
+        f"Distinct test structures  : {s['total_test_structures']}",
+        f"Found in source           : {s['total_found_in_source']} of {s['total_test_rows']} "
+        "test row(s) present (presence alone is not a finding)",
+        f"Source documents          : {s['total_documents']}",
+    ]
+    if s["total_findings_by_match_type"]:
+        lines.append(
+            f"  by match type           : {_fmt_counts(s['total_findings_by_match_type'])}"
+        )
+    if s["total_findings_by_representation"]:
+        lines.append(
+            f"  by representation       : {_fmt_counts(s['total_findings_by_representation'])}"
+        )
+    lines.append("=" * 60)
+    lines.append("")
+    lines.extend(
+        _section(
+            "Endpoint Matches (public leakage)", _public_finding_lines(report["findings"], context)
+        )
+    )
+    lines.extend(
+        _section("Test-Set Share By Source Document", _public_document_lines(report["by_document"]))
+    )
+    lines.extend(
+        _section("Present In Source (not a finding)", _public_presence_lines(report["presence"]))
+    )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _public_match_table(s: PublicSearchSummary, context: TierContext) -> Table | None:
+    """Build the public-search findings-by-match-type table.
+
+    Parameters
+    ----------
+    s : PublicSearchSummary
+        The report's ``"summary"`` dict.
+    context : TierContext
+        The settings finding tiers depend on.
+
+    Returns
+    -------
+    Table | None
+        A rich table with one row per representation and match type that
+        fired, or ``None`` if nothing matched the endpoint.
+    """
+    by_type = {**s["blocking"]["by_type"], **s["flagged"]["by_type"]}
+    if not by_type:
+        return None
+    table = _new_table(["Finding type", "Tier", "Findings", "Rows"])
+    for finding_type, counts in sorted(by_type.items()):
+        severity = severity_of(finding_type, None, context)
+        style = _count_style(1, severity)
+        table.add_row(
+            finding_type,
+            f"[{style}]{severity}[/]",
+            str(counts["findings"]),
+            str(counts["rows"]),
+        )
+    return table
+
+
+def _public_document_table(by_document: Sequence[PublicDocumentSummary]) -> Table | None:
+    """Build the per-document share table for the dashboard.
+
+    Parameters
+    ----------
+    by_document : Sequence[PublicDocumentSummary]
+        The report's ``by_document``.
+
+    Returns
+    -------
+    Table | None
+        A rich table of the documents covering the most test rows, or
+        ``None`` if no finding had a source document.
+    """
+    if not by_document:
+        return None
+    table = _new_table(["Document", "Test rows", "Share of test set", "Reference"])
+    for summary in by_document[:10]:
+        table.add_row(
+            summary["document_chembl_id"],
+            str(summary["test_rows"]),
+            f"{summary['fraction_of_test_set']:.1%}",
+            summary["reference"] or "",
+        )
+    return table
+
+
+def print_public_search_summary(
+    report: PublicSearchReport, report_output: str | Path | None
+) -> None:
+    """Print the stdout summary dashboard for a public-source search.
+
+    Shows which release was searched, how much of the test set is present
+    in it, the endpoint matches by tier, and the documents covering the
+    most test rows, followed by the PASS/WARN/FAIL banner. Assembled into
+    a single rich ``Group`` and printed once, as ``print_summary`` is.
+
+    Parameters
+    ----------
+    report : PublicSearchReport
+        The report dict, as returned by ``build_public_search_report``.
+    report_output : str | Path | None
+        Path the full report was written to, shown in the final line, or
+        ``None`` if it wasn't written to disk.
+
+    Returns
+    -------
+    None
+    """
+    context = _tier_context(report)
+    s = report["summary"]
+    src = report["source"]
+    release = src["release"] or "(unknown release)"
+    renderables: list[RenderableType] = [
+        Rule("[bold cyan]challenge-data-checker public-source search summary[/]", style="cyan"),
+        f"  Generated          : {report['generated_at']}",
+        f"  Source             : ChEMBL [bold]{escape(release)}[/]"
+        + (f" ({src['release_date']})" if src["release_date"] else ""),
+        f"  Test rows          : [bold]{s['total_test_rows']}[/]  "
+        f"distinct structures=[bold]{s['total_test_structures']}[/]",
+        f"  Present in source  : [bold]{s['total_found_in_source']}[/] of "
+        f"{s['total_test_rows']} test row(s)  [dim](presence alone is not a finding)[/]",
+        "  Legend             : [bold red]✗ blocking (FAIL)[/]  "
+        "[bold yellow]⚠ flagged for review (WARN)[/]  [bold green]✓ clean[/]",
+        "",
+    ]
+    renderables.extend(_section_renderables("Endpoint matches", _public_match_table(s, context)))
+    renderables.extend(
+        _section_renderables(
+            "Test-set share by source document", _public_document_table(report["by_document"])
+        )
+    )
+    renderables.append(_status_rule(s))
+    if report_output is not None:
+        renderables.append(f"Full detailed report written to: [bold]{report_output}[/]")
+
+    Console(highlight=False).print(Group(*renderables))

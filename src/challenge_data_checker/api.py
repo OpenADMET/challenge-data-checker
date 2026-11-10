@@ -3,6 +3,9 @@
 Intended for interactive use (e.g. a Jupyter notebook): pass train/test data
 as file paths and/or already-loaded pandas DataFrames, mixed freely, and get
 the same report dict the CLI produces, without needing files on disk.
+
+``audit`` compares a train/test split, ``check`` vets a single dataset, and
+``search_public`` asks whether a blinded test set is already public.
 """
 
 from collections.abc import Sequence
@@ -16,14 +19,17 @@ from challenge_data_checker.config import (
     ColumnsConfig,
     Config,
     PathsConfig,
+    PublicSearchConfig,
+    PublicSearchPathsConfig,
     SettingsConfig,
     infer_report_format,
+    parse_public_search,
     parse_settings,
 )
-from challenge_data_checker.core import run_audit, run_check
+from challenge_data_checker.core import run_audit, run_check, run_public_search
 from challenge_data_checker.io_utils import DataSource
 from challenge_data_checker.quality_filters import DEFAULT_MULTI_COMPONENT_MIN_HEAVY_ATOMS
-from challenge_data_checker.report_types import CheckReport, Report
+from challenge_data_checker.report_types import CheckReport, PublicSearchReport, Report
 
 # A single train/test argument: one source, or a list of sources (paths and/or
 # DataFrames freely mixed).
@@ -218,3 +224,106 @@ def check(
         config_path=None,
     )
     return run_check(config, save=report_output is not None, print_report=print_report)
+
+
+def search_public(
+    test: DataInput,
+    chembl_sqlite: str | Path,
+    assay_chembl_ids: Sequence[str] | None = None,
+    target_chembl_ids: Sequence[str] | None = None,
+    target_names: Sequence[str] | None = None,
+    standard_types: Sequence[str] | None = None,
+    match_connectivity: bool = False,
+    smiles_column: str = "SMILES",
+    identifier_columns: Sequence[str] | None = None,
+    tautomer_standardisation: bool = False,
+    strip_salts: bool = True,
+    report_output: str | Path | None = None,
+    report_format: str | None = None,
+    print_report: bool = True,
+) -> PublicSearchReport:
+    """Search a public database for a blinded test set, directly from Python.
+
+    Answers a different question from ``audit``: not "does train overlap
+    test?" but "is this test set already public?". A test compound simply
+    being in ChEMBL is not leakage, so at least one of
+    ``assay_chembl_ids``, ``target_chembl_ids`` or ``target_names`` must be
+    given to say what the challenge endpoint is.
+
+    The search runs against a **local** ChEMBL release rather than the REST
+    API, so a blinded test set never leaves the machine and the report can
+    cite a release number.
+
+    Parameters
+    ----------
+    test : DataInput
+        The (blinded) test set: a single data file path, URL or DataFrame,
+        or a list mixing these.
+    chembl_sqlite : str | Path
+        Path to a local ChEMBL SQLite release.
+    assay_chembl_ids : Sequence[str] | None
+        ChEMBL assay IDs that measure the challenge endpoint. A match is
+        blocking.
+    target_chembl_ids : Sequence[str] | None
+        ChEMBL target IDs for the challenge endpoint. A match is blocking.
+    target_names : Sequence[str] | None
+        Target names or gene symbols (e.g. ``CYP3A4``) resolved against
+        the release. A match is flagged, not blocking.
+    standard_types : Sequence[str] | None
+        Allowed ``standard_type`` values for a ``target_names`` match
+        (e.g. ``IC50``, ``Ki``), compared case-insensitively. Empty
+        allows any.
+    match_connectivity : bool
+        Whether to also match on the InChIKey connectivity block, catching
+        differing or undefined stereochemistry. Off by default: it is the
+        slowest lookup.
+    smiles_column : str
+        Name of the SMILES column, resolved per source as in ``audit``.
+    identifier_columns : Sequence[str] | None
+        Optional identifier column names, echoed into the report. The
+        public lookup is structural, so these aren't matched on.
+    tautomer_standardisation : bool
+        Whether to canonicalise tautomers before comparing molecules.
+    strip_salts : bool
+        Whether to also look compounds up by their salt-stripped parent,
+        so a test free base matches a ChEMBL salt form.
+    report_output : str | Path | None
+        Optional path to also write the full report to.
+    report_format : str | None
+        ``"json"`` or ``"txt"``; inferred from ``report_output`` if
+        omitted.
+    print_report : bool
+        Whether to print the colour-coded summary dashboard to stdout.
+
+    Returns
+    -------
+    PublicSearchReport
+        The full report. ``report["summary"]["status"]`` is the overall
+        result: ``"PASS"``, ``"WARN"`` or ``"FAIL"``.
+    """
+    config = PublicSearchConfig(
+        paths=PublicSearchPathsConfig(
+            test_files=_as_source_list(test), report_output=report_output
+        ),
+        columns=ColumnsConfig(
+            smiles_column=smiles_column,
+            identifier_columns=list(identifier_columns) if identifier_columns else [],
+        ),
+        settings=SettingsConfig(
+            tautomer_standardisation=tautomer_standardisation,
+            strip_salts=strip_salts,
+            report_format=infer_report_format(report_format, report_output),
+        ),
+        public_search=parse_public_search(
+            {
+                "chembl_sqlite": str(chembl_sqlite),
+                "match_connectivity": match_connectivity,
+                "assay_chembl_ids": list(assay_chembl_ids) if assay_chembl_ids else [],
+                "target_chembl_ids": list(target_chembl_ids) if target_chembl_ids else [],
+                "target_names": list(target_names) if target_names else [],
+                "standard_types": list(standard_types) if standard_types else [],
+            }
+        ),
+        config_path=None,
+    )
+    return run_public_search(config, save=report_output is not None, print_report=print_report)

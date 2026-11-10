@@ -4,6 +4,34 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); tagged releases use
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **`public-search` command**: searches a local ChEMBL SQLite release for a
+  blinded test set, to find out whether its measurements are already public
+  (#18). A local release is used rather than the REST API so the test set
+  never leaves the machine, and so the report can cite the release it
+  searched; only `sqlite3` from the standard library is needed, so this adds
+  no dependency.
+  - Presence in ChEMBL is reported as a count and a list, never as a
+    finding: most drug-like compounds appear somewhere.
+  - A finding needs a public record measuring the challenge endpoint, named
+    with `assay_chembl_ids`, `target_chembl_ids` or `target_names`.
+  - Salt forms are matched through ChEMBL's `molecule_hierarchy`
+    (`parent_molregno`) against the salt-stripped parent the checker already
+    computes, and stereochemistry differences through the InChIKey
+    connectivity block.
+  - New finding types, tiered by rule 3: `public_assay_overlap` (FAIL),
+    `public_assay_stereo_overlap` (WARN) and `public_target_type_overlap`
+    (WARN).
+  - Findings are grouped by ChEMBL document, so a single paper covering much
+    of the test set stands out.
+  - Available as `challenge-data-checker public-search`, with a
+    `[public_search]` config section or equivalent flags, and as
+    `search_public()` in the Python API.
+  - Reports carry `"mode": "public_search"`.
+
 ## [0.4.0] - 2026-10-23
 
 A large release: severity tiers with a three-state result and CI-friendly
