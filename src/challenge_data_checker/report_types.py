@@ -517,7 +517,17 @@ class ChemblCompound(TypedDict):
 
 
 class ChemblActivity(TypedDict):
-    """One measured activity record attached to a matched ChEMBL compound."""
+    """One activity record attached to a matched ChEMBL compound.
+
+    A result is not always a number. ``standard_text_value`` carries a
+    categorical outcome ("Not active", "Toxic") where ``standard_value`` is
+    empty, and ChEMBL's schema documentation states each record has one or
+    the other, never both. Either exposes a challenge answer, so both are
+    read.
+
+    ``activity_comment`` is what separates a result from a non-result: an
+    endpoint logged as "Not Determined" was looked at, not measured.
+    """
 
     assay_chembl_id: str | None
     assay_description: str | None
@@ -529,6 +539,8 @@ class ChemblActivity(TypedDict):
     standard_value: float | None
     standard_units: str | None
     pchembl_value: float | None
+    standard_text_value: str | None
+    activity_comment: str | None
     document_chembl_id: str | None
     document_reference: str | None
 

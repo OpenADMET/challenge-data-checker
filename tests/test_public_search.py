@@ -25,11 +25,13 @@ from challenge_data_checker.config import (
     SettingsConfig,
     parse_public_search,
 )
+from challenge_data_checker.public_search import _is_measured
 from challenge_data_checker.report import (
     build_public_search_report,
     format_report_as_text,
     print_public_search_summary,
 )
+from challenge_data_checker.report_types import ChemblActivity
 from challenge_data_checker.severity import TIERS, Severity, TierContext, severity_of
 
 _PROCESSOR = MoleculeProcessor(SettingsConfig())
@@ -40,8 +42,11 @@ PROPRANOLOL_FREE_BASE = "CC(C)NCC(O)COc1cccc2ccccc12"
 S_IBUPROFEN = "CC(C)Cc1ccc([C@@H](C)C(=O)O)cc1"
 ASPIRIN = "CC(=O)Oc1ccccc1C(=O)O"
 RACEMIC_IBUPROFEN = "CC(C)Cc1ccc(C(C)C(=O)O)cc1"
-# In ChEMBL with a CYP3A4 record that has no measured result.
+# In ChEMBL with a CYP3A4 record whose activity_comment says the endpoint was
+# never measured.
 PARACETAMOL = "CC(=O)Nc1ccc(O)cc1"
+# Its only CYP3A4 record is a text result with no number.
+WARFARIN = "CC(=O)CC(c1ccccc1)c1c(O)c2ccccc2oc1=O"
 # Measured in one paper itself, and in another through its salt form.
 METOPROLOL_FREE_BASE = "CC(C)NCC(O)COc1ccc(CCOC)cc1"
 # Its activity's own doc_id differs from its assay's.
@@ -344,14 +349,58 @@ def test_evidence_from_a_second_document_survives_deduplication(chembl):
     }
 
 
-def test_an_activity_with_no_measured_result_is_not_a_leak(chembl):
-    # Regression: ChEMBL holds CYP3A4 rows with no value, e.g. "Not
-    # Determined". The endpoint was looked at, not measured, so no answer is
-    # exposed and the run must not be blocked.
+def test_an_activity_marked_not_determined_is_not_a_leak(chembl):
+    # Regression: ChEMBL holds CYP3A4 rows whose activity_comment says the
+    # endpoint was never measured. It was looked at, not measured, so no
+    # answer is exposed and the run must not be blocked.
     report = search(chembl, [PARACETAMOL])
     assert report["findings"] == []
     assert report["summary"]["status"] == "PASS"
     assert report["summary"]["total_found_in_source"] == 1
+
+
+def test_only_the_comment_decides_whether_a_record_was_measured(chembl):
+    # The narrow rule, stated as a unit: the comment is the only thing that
+    # rejects a record, matched case- and whitespace-insensitively, and a
+    # record with no comment counts however little else it carries.
+    blank: ChemblActivity = {
+        "assay_chembl_id": None,
+        "assay_description": None,
+        "target_chembl_id": None,
+        "target_name": None,
+        "organism": None,
+        "standard_type": None,
+        "standard_relation": None,
+        "standard_value": None,
+        "standard_units": None,
+        "pchembl_value": None,
+        "standard_text_value": None,
+        "activity_comment": None,
+        "document_chembl_id": None,
+        "document_reference": None,
+    }
+    assert _is_measured(blank)
+    for comment in ("Not Determined", "not determined", "  NOT TESTED  ", "Inconclusive"):
+        assert not _is_measured({**blank, "activity_comment": comment}), comment
+    # A qualitative verdict is a result, not a missing one: a compound
+    # reported inactive against the challenge endpoint is still an answer.
+    for comment in ("Not Active", "Inactive", "Active", "Potency determined"):
+        assert _is_measured({**blank, "activity_comment": comment}), comment
+
+
+def test_a_text_only_result_is_a_leak(chembl):
+    # Regression: warfarin's only CYP3A4 record has no number, just the text
+    # result "Not active". Requiring a numeric value dropped every
+    # qualitative endpoint, so this must be a finding. Negative control for
+    # the narrowed rule: restoring the numeric requirement makes it fail.
+    report = search(chembl, [WARFARIN])
+    assert matches(report) == [("inchikey", "explicit_id")]
+    assert report["summary"]["status"] == "FAIL"
+    (activity,) = report["findings"][0]["activities"]
+    assert activity["standard_value"] is None
+    assert activity["standard_text_value"] == "Not active"
+    # The rendering must show the result, not an empty measurement.
+    assert "Activity = Not active" in format_report_as_text(report)
 
 
 def test_activity_is_cited_to_its_own_document_not_its_assays(chembl):

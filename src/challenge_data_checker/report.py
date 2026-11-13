@@ -1994,13 +1994,17 @@ def _fmt_activity(activity: ChemblActivity) -> str:
     Returns
     -------
     str
-        The measurement, its target and assay, and its source document.
+        The measurement, its target and assay, and its source document. A
+        categorical result is shown where there is no numeric one, since
+        ChEMBL records one or the other and a text result is an answer too.
     """
     measurement = activity["standard_type"] or "?"
     if activity["standard_value"] is not None:
         relation = activity["standard_relation"] or "="
         units = f" {activity['standard_units']}" if activity["standard_units"] else ""
         measurement += f" {relation} {activity['standard_value']:g}{units}"
+    elif activity["standard_text_value"]:
+        measurement += f" = {activity['standard_text_value']}"
     parts = [measurement]
     target = activity["target_chembl_id"] or activity["target_name"]
     if target:

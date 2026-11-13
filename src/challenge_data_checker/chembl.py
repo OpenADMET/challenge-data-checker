@@ -18,6 +18,11 @@ dependency. The connection is opened read-only, and the test set's lookup
 keys go into a TEMP table (which lives in the separate temp database, so a
 read-only connection can still create one) rather than into a long ``IN``
 list, which keeps every query to one statement regardless of test-set size.
+
+The activity query reads ``activities.standard_text_value``, which ChEMBL
+added in release 26, so release 26 or newer is needed. An older release
+fails with the ``ChemblSourceError`` ``find_activities`` raises for any
+schema mismatch, rather than silently finding nothing.
 """
 
 import logging
@@ -502,6 +507,11 @@ SELECT a.molregno AS molregno,
        a.standard_value AS standard_value,
        a.standard_units AS standard_units,
        a.pchembl_value AS pchembl_value,
+       -- A result can be text rather than a number ("Not active", "Toxic"),
+       -- and activity_comment says whether the endpoint was measured at all.
+       -- Both are needed to tell a qualitative answer from a non-answer.
+       a.standard_text_value AS standard_text_value,
+       a.activity_comment AS activity_comment,
        ass.chembl_id AS assay_chembl_id,
        ass.description AS assay_description,
        td.chembl_id AS target_chembl_id,
@@ -530,6 +540,8 @@ SELECT a.molregno AS molregno,
        a.standard_value AS standard_value,
        a.standard_units AS standard_units,
        a.pchembl_value AS pchembl_value,
+       a.standard_text_value AS standard_text_value,
+       a.activity_comment AS activity_comment,
        ass.chembl_id AS assay_chembl_id,
        ass.description AS assay_description,
        td.chembl_id AS target_chembl_id,
@@ -629,6 +641,12 @@ def find_activities(
                 None if row["standard_units"] is None else str(row["standard_units"])
             ),
             "pchembl_value": _as_float(row["pchembl_value"]),
+            "standard_text_value": (
+                None if row["standard_text_value"] is None else str(row["standard_text_value"])
+            ),
+            "activity_comment": (
+                None if row["activity_comment"] is None else str(row["activity_comment"])
+            ),
             "document_chembl_id": (
                 str(row["document_chembl_id"])
                 if "document_chembl_id" in columns and row["document_chembl_id"] is not None

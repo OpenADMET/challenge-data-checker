@@ -386,10 +386,13 @@ strong the endpoint evidence is:
 | InChIKey connectivity block | a configured assay or target ID | `public_assay_stereo_overlap` | WARN |
 | any | target resolved from a name, plus an allowed `standard_type` | `public_target_type_overlap` | WARN |
 
-An activity with no measured result, such as a CYP3A4 endpoint recorded as
-"Not Determined", is not a finding either: the endpoint was looked at, not
-measured, so no answer is exposed. Only numeric results count, so a purely
-qualitative active/inactive record with no value is also skipped.
+An activity ChEMBL marks as never measured is not a finding either: an
+`activity_comment` of "Not Determined", "Not tested" or "Inconclusive"
+means the endpoint was looked at, not measured, so no answer is exposed.
+That is the only thing skipped. A text result counts: ChEMBL holds
+categorical outcomes such as "Not active" in `standard_text_value` with no
+number beside them, and a compound reported inactive against the
+challenge's endpoint is an answer and a leak like any other.
 
 Only a named assay or target on an exact or salt-form structure match
 blocks. Resolving a target from a name is a guess, and a connectivity-only

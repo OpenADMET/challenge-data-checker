@@ -13,6 +13,7 @@ that what the fixture contains is reviewable in the diff.
 
 import sqlite3
 from pathlib import Path
+from typing import NamedTuple
 
 from challenge_data_checker.chemistry import MoleculeProcessor
 from challenge_data_checker.config import SettingsConfig
@@ -70,6 +71,8 @@ P450_FAMILY_ASSAY = "CHEMBL_ASSAY_P450"
 #   5 aspirin                  - present in ChEMBL but only measured against
 #                                an unrelated target, so presence without a
 #                                finding
+#  11 warfarin                 - a CYP3A4 result recorded as text with no
+#                                number, which is still an answer
 COMPOUNDS: tuple[tuple[int, str, str, int], ...] = (
     (1, "CHEMBL113", "Cn1c(=O)c2c(ncn2C)n(C)c1=O", 1),
     (2, "CHEMBL27", "CC(C)NCC(O)COc1cccc2ccccc12", 2),
@@ -81,32 +84,72 @@ COMPOUNDS: tuple[tuple[int, str, str, int], ...] = (
     (8, "CHEMBL1200619", "CC(C)NCC(O)COc1ccc(CCOC)cc1.Cl", 7),
     (9, "CHEMBL190", "Cn1c(=O)c2[nH]cnc2n(C)c1=O", 9),
     (10, "CHEMBL3", "CN1CCC[C@H]1c1cccnc1", 10),
+    (11, "CHEMBL1464", "CC(=O)CC(c1ccccc1)c1c(O)c2ccccc2oc1=O", 11),
 )
 
-# Activities, as (molregno, assay, standard_type, value, own doc_id or None to
-# inherit the assay's). A ``None`` value is a record with no measured result,
-# such as an endpoint logged as "Not Determined".
+
+class Activity(NamedTuple):
+    """One activity row of the fixture release.
+
+    The defaults are the ordinary case - a numeric result, no curation
+    comment - so a row only states the column it is in the fixture to
+    exercise.
+
+    Attributes
+    ----------
+    molregno : int
+        The compound measured.
+    assay : str
+        ChEMBL ID of the assay, a key of ``assays`` in ``build_fixture``.
+    standard_type : str
+        The measurement type, e.g. ``IC50``.
+    value : float | None
+        The numeric result, or ``None`` for a record with none.
+    own_doc_id : int | None
+        The activity's own ``doc_id``, or ``None`` to inherit its assay's.
+    text_value : str | None
+        A categorical result in ``standard_text_value``, which ChEMBL uses
+        instead of a number rather than as well as one.
+    activity_comment : str | None
+        ChEMBL's note on the measurement, e.g. ``"Not Determined"`` for an
+        endpoint that was looked at but never measured.
+    """
+
+    molregno: int
+    assay: str
+    standard_type: str
+    value: float | None = None
+    own_doc_id: int | None = None
+    text_value: str | None = None
+    activity_comment: str | None = None
+
+
+# Activities.
 #
 #   1 caffeine        - CYP3A4 IC50
 #   3 propranolol HCl - CYP3A4 IC50, reached from the free base via the parent
 #   4 ibuprofen       - CYP3A4 Ki, so an IC50-only config must not match it
 #   5 aspirin         - an unrelated target, so presence without a finding
-#   6 paracetamol     - CYP3A4 but no measured result, so no answer is exposed
+#   6 paracetamol     - a CYP3A4 endpoint ChEMBL marks "Not Determined", so it
+#                       was looked at, not measured, and exposes no answer
 #   7 metoprolol      - CYP3A4 in document 2
 #   8 metoprolol HCl  - CYP3A4 in document 1, so the free base reaches two
 #                       documents, one of them only through its parent
 #   9 theophylline    - an activity whose own doc_id differs from its assay's
-ACTIVITIES: tuple[tuple[int, str, str, float | None, int | None], ...] = (
-    (1, CYP3A4_ASSAY, "IC50", 45.0, None),
-    (3, CYP3A4_ASSAY, "IC50", 120.0, None),
-    (4, CYP3A4_ASSAY, "Ki", 3100.0, None),
-    (5, KINASE_ASSAY, "IC50", 900.0, None),
-    (6, CYP3A4_ASSAY, "IC50", None, None),
-    (7, CYP3A4_ASSAY_2, "IC50", 61.0, None),
-    (8, CYP3A4_ASSAY, "IC50", 72.0, None),
-    (9, CYP3A4_ASSAY_3, "IC50", 88.0, 3),
+#  11 warfarin        - a CYP3A4 result held as text with no number, which is
+#                       an answer all the same
+ACTIVITIES: tuple[Activity, ...] = (
+    Activity(1, CYP3A4_ASSAY, "IC50", 45.0),
+    Activity(3, CYP3A4_ASSAY, "IC50", 120.0),
+    Activity(4, CYP3A4_ASSAY, "Ki", 3100.0),
+    Activity(5, KINASE_ASSAY, "IC50", 900.0),
+    Activity(6, CYP3A4_ASSAY, "IC50", activity_comment="Not Determined"),
+    Activity(7, CYP3A4_ASSAY_2, "IC50", 61.0),
+    Activity(8, CYP3A4_ASSAY, "IC50", 72.0),
+    Activity(9, CYP3A4_ASSAY_3, "IC50", 88.0, own_doc_id=3),
     # 10 nicotine - measured only against the whole P450 family target
-    (10, P450_FAMILY_ASSAY, "IC50", 50.0, None),
+    Activity(10, P450_FAMILY_ASSAY, "IC50", 50.0),
+    Activity(11, CYP3A4_ASSAY, "Activity", text_value="Not active"),
 )
 
 _SCHEMA = """
@@ -166,6 +209,8 @@ CREATE TABLE activities (
     standard_value REAL,
     standard_units TEXT,
     pchembl_value REAL,
+    standard_text_value TEXT,
+    activity_comment TEXT,
     doc_id INTEGER
 );
 CREATE INDEX idx_act_molregno ON activities (molregno);
@@ -300,23 +345,26 @@ def build_fixture(path: str | Path) -> Path:
             )
 
         for activity_id, activity in enumerate(ACTIVITIES, start=1):
-            molregno, assay, standard_type, value, own_doc_id = activity
-            assay_id, _tid, assay_doc_id = assays[assay]
+            assay_id, _tid, assay_doc_id = assays[activity.assay]
+            value = activity.value
             conn.execute(
                 """INSERT INTO activities
                    (activity_id, assay_id, molregno, standard_type, standard_relation,
-                    standard_value, standard_units, pchembl_value, doc_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    standard_value, standard_units, pchembl_value, standard_text_value,
+                    activity_comment, doc_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     activity_id,
                     assay_id,
-                    molregno,
-                    standard_type,
+                    activity.molregno,
+                    activity.standard_type,
                     "=" if value is not None else None,
                     value,
                     "nM" if value is not None else None,
                     None,
-                    own_doc_id if own_doc_id is not None else assay_doc_id,
+                    activity.text_value,
+                    activity.activity_comment,
+                    activity.own_doc_id if activity.own_doc_id is not None else assay_doc_id,
                 ),
             )
         conn.commit()

@@ -174,15 +174,35 @@ def lookup_keys(
     return {representation: sorted(values) for representation, values in index.items() if values}
 
 
-def _has_result(activity: ChemblActivity) -> bool:
-    """Whether an activity actually carries a measured result.
+# ``activity_comment`` values that say the endpoint was never measured, so
+# the record cannot expose a challenge answer. Deliberately short: anything
+# not on it is treated as a result, because under-reporting a leak is the
+# worse error. Compared lower-cased and stripped.
+#
+# "Not determined" is ChEMBL's own example of the non-numeric activities
+# this column used to carry (ChEMBL schema documentation, ``activities``:
+# "Previously used to report non-numeric activities i.e. 'Slighty active',
+# 'Not determined'"), and "Not tested" is the same statement. "Inconclusive"
+# comes from the PubChem Activity Summary vocabulary that ChEMBL copies into
+# this column for PubChem depositions: the assay ran but reached no
+# conclusion, so there is still no answer to read off.
+#
+# Note what is *not* here: "Not active", "Inactive" and the rest of that
+# vocabulary are results. A compound reported inactive against the
+# challenge's endpoint is an answer, and a leaked one.
+_NOT_MEASURED_COMMENTS: frozenset[str] = frozenset({"not determined", "not tested", "inconclusive"})
 
-    ChEMBL holds activity rows with no numeric result, for example an
-    endpoint recorded as "Not Determined". Those say the endpoint was
-    *looked at*, not that it was measured, so they cannot expose a
-    challenge answer and must not block a release. Only numeric results are
-    recognised, so a purely qualitative record (an active/inactive call
-    with no value) is also treated as no result.
+
+def _is_measured(activity: ChemblActivity) -> bool:
+    """Whether an activity record is a measurement at all.
+
+    Only records ChEMBL explicitly marks as not measured are rejected,
+    through ``activity_comment``. Everything else counts, text results
+    included: a categorical outcome in ``standard_text_value`` ("Not
+    active") answers the challenge's question just as a number does, and
+    ChEMBL's schema documentation notes a record carries a value or a text
+    value, never both. Requiring a numeric value therefore dropped every
+    qualitative endpoint, which is a whole class of missed leakage.
 
     Parameters
     ----------
@@ -192,9 +212,11 @@ def _has_result(activity: ChemblActivity) -> bool:
     Returns
     -------
     bool
-        ``True`` if it has a standard value or a pChEMBL value.
+        ``False`` only if ``activity_comment`` is one of
+        ``_NOT_MEASURED_COMMENTS``, otherwise ``True``.
     """
-    return activity["standard_value"] is not None or activity["pchembl_value"] is not None
+    comment = (activity["activity_comment"] or "").strip().lower()
+    return comment not in _NOT_MEASURED_COMMENTS
 
 
 def classify_activity(
@@ -228,9 +250,9 @@ def classify_activity(
         ``"explicit_id"`` if the configuration named this assay or target,
         ``"target_type"`` if a resolved target and an allowed measurement
         type both match, otherwise ``None``. Also ``None`` for a record
-        with no measured result, which exposes no answer.
+        ChEMBL marks as never measured, which exposes no answer.
     """
-    if not _has_result(activity):
+    if not _is_measured(activity):
         return None
 
     assay_id = activity["assay_chembl_id"]
