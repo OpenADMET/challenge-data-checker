@@ -344,6 +344,29 @@ def test_a_release_without_a_version_table_still_searches(tmp_path, chembl):
     assert report["summary"]["status"] == "FAIL"
 
 
+def test_a_release_without_a_docs_table_still_searches(tmp_path, chembl):
+    # A trimmed dump loses per-document grouping, not the search, so the
+    # activity query has a second form for it. That form has to read the
+    # same quality columns as the first, or a flag would silently depend on
+    # whether the release happened to carry its documents.
+    path = tmp_path / "no_docs.sqlite"
+    path.write_bytes(chembl.read_bytes())
+    conn = sqlite3.connect(path)
+    conn.execute("DROP TABLE docs")
+    conn.commit()
+    conn.close()
+
+    report = search(path, [CAFFEINE, DICLOFENAC])
+    assert report["summary"]["status"] == "FAIL"
+    assert report["by_document"] == []
+    flags = {
+        activity["data_validity_comment"]
+        for finding in report["findings"]
+        for activity in finding["activities"]
+    }
+    assert "Potential transcription error" in flags
+
+
 def test_config_requires_an_endpoint_to_match():
     with pytest.raises(ConfigError, match="at least one of"):
         parse_public_search({"chembl_sqlite": "chembl.sqlite"})

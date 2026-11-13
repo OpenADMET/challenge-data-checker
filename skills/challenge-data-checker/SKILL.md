@@ -176,6 +176,7 @@ The sections:
 | `findings` (public-search) | Test structures whose public record measures the challenge endpoint, with the ChEMBL compounds and activities behind each |
 | `by_document` (public-search) | Findings grouped by ChEMBL document, with each one's share of the test set |
 | `presence` (public-search) | Test structures merely present in ChEMBL. **Not findings** |
+| `resolved_targets` (public-search) | Each configured target name and the ChEMBL target IDs it resolved to. An empty list means nothing matched, so that name could only ever pass |
 | `inconsistent_smiles` | Structures written as more than one SMILES string, with the files using each form |
 | `unparseable_smiles` | Rows that didn't parse, with RDKit's message, a `category`, and `resolvable_via_identifier` |
 
@@ -215,6 +216,19 @@ the training pool:
   rather than listing it as an issue.
 - **`by_document` concentration.** If one document covers a large share of
   the test set, lead with that: it means a single paper holds the answers.
+  Activities ChEMBL flags `potential_duplicate` are left out of these
+  counts, so a paper is credited only with what it measured, not with what
+  it cited.
+- **An activity with `data_validity_comment` set.** ChEMBL doubts the
+  number, not the fact that it was published. Still a leak - the compound
+  is unblinded either way - but say the value may be wrong.
+- **A text result.** A finding whose activity has no number but a
+  `standard_text_value` such as "Not active" is a real answer, recorded
+  categorically. Treat it as a leak, not as missing data.
+- **`resolved_targets` reaching more than expected.** If a gene symbol
+  resolved to a protein complex or family, the `public_target_type_overlap`
+  findings may be measurements of a different family member. Check before
+  reporting them.
 
 - **Probably benign.** Stereo-only overlap (`inchikey_connectivity`), where
   a racemate in one set and an enantiomer in the other can be a deliberate
