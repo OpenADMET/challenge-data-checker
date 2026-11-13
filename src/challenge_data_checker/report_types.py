@@ -650,12 +650,24 @@ class PublicSearchReport(TypedDict):
 
     Unlike an audit, there is no training pool: the test set is compared
     against a public database, so every row in a finding is a test row.
+
+    ``resolved_targets`` maps each configured target name or gene symbol to
+    the ChEMBL target IDs it resolved to. Resolution runs through
+    ``component_synonyms`` and ``target_components``, where one component
+    belongs to several targets, so a symbol can reach a protein complex or
+    family as well as the single protein meant. ``target_types`` keeps those
+    out by default, but the configuration can widen it and a release can
+    classify a target unexpectedly, so what was actually matched is recorded
+    rather than left to be inferred from the findings. A name that resolved
+    to nothing is listed with an empty list, which is the other failure a
+    reviewer needs to see.
     """
 
     generated_at: str
     mode: Literal["public_search"]
     source: ChemblSource
     config: PublicSearchReportConfig
+    resolved_targets: dict[str, list[str]]
     summary: PublicSearchSummary
     findings: list[PublicLeakageFinding]
     presence: list[PublicCompoundPresence]

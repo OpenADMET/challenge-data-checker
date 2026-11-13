@@ -1901,7 +1901,8 @@ def build_public_search_report(
     Returns
     -------
     PublicSearchReport
-        The report dict: the release searched, the echoed config, a
+        The report dict: the release searched, the echoed config, the
+        ChEMBL target IDs each configured target name resolved to, a
         summary of counts, the findings, the presence list and the
         per-document breakdown.
     """
@@ -1962,6 +1963,9 @@ def build_public_search_report(
             "target_types": settings.target_types,
             "report_format": config.settings.report_format,
         },
+        # Name by name, so a reviewer can see that CYP3A4 reached only
+        # CHEMBL340 and not a P450 family, without re-running the resolution.
+        "resolved_targets": {name: list(ids) for name, ids in resolved.items()},
         "summary": {
             "status": status,
             "blocking": blocking,
@@ -2103,6 +2107,32 @@ def _public_presence_lines(presence: Sequence[PublicCompoundPresence]) -> list[s
     ]
 
 
+def _public_resolved_target_lines(resolved_targets: Mapping[str, Sequence[str]]) -> list[str]:
+    """Render what each configured target name resolved to.
+
+    Target names go through ``component_synonyms``, where one protein
+    component belongs to several targets, so a gene symbol can reach a
+    complex or a family as well as the single protein intended. Printing the
+    IDs lets a reviewer check what was matched instead of inferring it from
+    the findings, and shows a name that resolved to nothing at all.
+
+    Parameters
+    ----------
+    resolved_targets : Mapping[str, Sequence[str]]
+        The report's ``resolved_targets``.
+
+    Returns
+    -------
+    list[str]
+        One line per configured name, or nothing if no names were
+        configured.
+    """
+    return [
+        f"  resolved {name:<16.16}: {list(ids) or '(nothing matched)'}"
+        for name, ids in resolved_targets.items()
+    ]
+
+
 def _format_public_search_report_as_text(report: PublicSearchReport) -> str:
     """Render a public-source search report as plain text.
 
@@ -2145,6 +2175,9 @@ def _format_public_search_report_as_text(report: PublicSearchReport) -> str:
         f"  target_names             : {cfg['target_names']}",
         f"  standard_types           : {cfg['standard_types']}",
         f"  target_types             : {cfg['target_types']}",
+        # What the names actually resolved to, so a protein family or complex
+        # that slipped through target_types is visible rather than inferred.
+        *_public_resolved_target_lines(report["resolved_targets"]),
         "",
         "=" * 60,
         "challenge-data-checker public-source search summary",
@@ -2279,6 +2312,20 @@ def print_public_search_summary(
         "[bold yellow]⚠ flagged for review (WARN)[/]  [bold green]✓ clean[/]",
         "",
     ]
+    # Shown on the dashboard as well as in the full report: a gene symbol can
+    # resolve to a protein complex or family, and that is worth seeing before
+    # acting on the banner below.
+    if report["resolved_targets"]:
+        renderables.insert(
+            3,
+            "  Resolved targets   : "
+            + escape(
+                ", ".join(
+                    f"{name} -> {', '.join(ids) or '(nothing matched)'}"
+                    for name, ids in report["resolved_targets"].items()
+                )
+            ),
+        )
     renderables.extend(_section_renderables("Endpoint matches", _public_match_table(s, context)))
     renderables.extend(
         _section_renderables(

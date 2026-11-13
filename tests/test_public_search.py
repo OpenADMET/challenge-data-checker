@@ -525,6 +525,42 @@ def test_target_types_can_be_widened_to_protein_families(chembl):
     assert targets == {P450_FAMILY_TARGET}
 
 
+def test_the_report_lists_what_each_target_name_resolved_to(chembl):
+    # Resolution goes through component_synonyms, where one component belongs
+    # to several targets, so a gene symbol can reach a family as well as the
+    # single protein. The report has to say which, or a reviewer cannot tell
+    # a correct search from one matching every P450.
+    report = search(chembl, [NICOTINE], target_chembl_ids=[], target_names=["CYP3A4"])
+    assert report["resolved_targets"] == {"CYP3A4": [CYP3A4_TARGET]}
+
+    widened = search(
+        chembl,
+        [NICOTINE],
+        target_chembl_ids=[],
+        target_names=["CYP3A4"],
+        target_types=["SINGLE PROTEIN", "PROTEIN FAMILY"],
+    )
+    assert widened["resolved_targets"] == {"CYP3A4": sorted([CYP3A4_TARGET, P450_FAMILY_TARGET])}
+    # The whole point is that a widened run is visibly different, so the two
+    # must not report the same resolution.
+    assert widened["resolved_targets"] != report["resolved_targets"]
+
+
+def test_a_target_name_that_resolved_to_nothing_is_reported_as_such(chembl):
+    # The other way the resolution misleads: nothing matched, so the search
+    # could only ever pass. Silence would read as a clean result.
+    report = search(chembl, [CAFFEINE], target_chembl_ids=[], target_names=["NOT_A_REAL_TARGET"])
+    assert report["resolved_targets"] == {"NOT_A_REAL_TARGET": []}
+    assert "nothing matched" in format_report_as_text(report)
+
+
+def test_resolved_targets_are_rendered_for_review(chembl, capsys):
+    report = search(chembl, [CAFFEINE], target_chembl_ids=[], target_names=["CYP3A4"])
+    assert f"resolved CYP3A4          : ['{CYP3A4_TARGET}']" in format_report_as_text(report)
+    print_public_search_summary(report, None)
+    assert f"CYP3A4 -> {CYP3A4_TARGET}" in capsys.readouterr().out
+
+
 def test_config_rejects_empty_target_types():
     with pytest.raises(ConfigError, match="target_types"):
         parse_public_search(

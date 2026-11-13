@@ -416,6 +416,12 @@ signal there is.
 
 `target_names` resolves to single-protein targets only unless `target_types` widens it. In ChEMBL 37 the gene symbol `CYP3A4` resolves to the single protein CHEMBL340 and also to three protein families, the broadest being every cytochrome P450 (CHEMBL4523986). Matching those would flag a CYP2D6 measurement recorded against the family as a CYP3A4 leak.
 
+Whatever each name resolved to is recorded in the report as
+`resolved_targets`, and shown in the summary, so a complex or family that
+came in through a shared protein component is visible rather than left to
+be inferred from the findings. A name that matched nothing is listed too,
+since that search could only ever pass.
+
 `match_connectivity` is off by default because no index covers an InChIKey
 prefix, so that lookup scans `compound_structures` once. The exact and
 salt-form lookups are indexed and fast.
