@@ -493,3 +493,235 @@ def load_check_config(config_path: str | Path) -> CheckConfig:
         settings=parse_settings(settings_raw, paths.report_output),
         config_path=config_path,
     )
+
+
+@dataclass(frozen=True)
+class PublicSearchPathsConfig:
+    """Test-set sources and report destination for a public-source search.
+
+    Attributes
+    ----------
+    test_files : Sequence[DataSource]
+        The (blinded) test set's sources: paths, URLs and/or DataFrames.
+        There is no training pool: the comparison is against a public
+        database.
+    report_output : str | Path | None
+        Where to write the report, or ``None`` to skip writing a file.
+    """
+
+    test_files: Sequence[DataSource]
+    report_output: str | Path | None
+
+
+@dataclass(frozen=True)
+class PublicSearchSettings:
+    """The ``[public_search]`` section: which source, and which endpoint.
+
+    The endpoint matchers are what separate leakage from coincidence. A
+    test compound simply being in ChEMBL is not leakage, so at least one of
+    ``assay_chembl_ids``, ``target_chembl_ids`` or ``target_names`` must be
+    given, or the search has no endpoint to match and can only report
+    presence.
+
+    Attributes
+    ----------
+    chembl_sqlite : str | Path
+        Path to a local ChEMBL SQLite release. A local release is used
+        rather than the REST API so a blinded test set never leaves the
+        machine, and so the report can cite a release number.
+    match_connectivity : bool
+        Whether to also match on the InChIKey connectivity block, which
+        catches differing or undefined stereochemistry. On by default:
+        undefined stereochemistry is one of the two leakage modes seen in
+        practice, and the lookup is a range scan of ChEMBL's InChIKey index
+        rather than a table scan, so leaving it off buys little. A match is
+        only ever flagged, never blocking, since it may be a deliberate
+        stereo split.
+    assay_chembl_ids : list[str]
+        ChEMBL assay IDs that measure the challenge endpoint. A match
+        blocks.
+    target_chembl_ids : list[str]
+        ChEMBL target IDs for the challenge endpoint. A match blocks.
+    target_names : list[str]
+        Target names or gene symbols (e.g. ``CYP3A4``) resolved against
+        the release. A match is flagged, not blocking, because the
+        resolution is a guess.
+    standard_types : list[str]
+        Allowed ``standard_type`` values (e.g. ``IC50``, ``Ki``,
+        ``Inhibition``) for a ``target_names`` match, compared
+        case-insensitively. Empty allows any type.
+    target_types : list[str]
+        ChEMBL ``target_type`` values a ``target_names`` entry may resolve
+        to. Defaults to single proteins only: a gene symbol such as CYP3A4
+        is also a component of protein-family targets, up to every
+        cytochrome P450 at once.
+    """
+
+    chembl_sqlite: str | Path
+    match_connectivity: bool = True
+    assay_chembl_ids: list[str] = field(default_factory=list)
+    target_chembl_ids: list[str] = field(default_factory=list)
+    target_names: list[str] = field(default_factory=list)
+    standard_types: list[str] = field(default_factory=list)
+    target_types: list[str] = field(default_factory=lambda: ["SINGLE PROTEIN"])
+
+
+@dataclass(frozen=True)
+class PublicSearchConfig:
+    """Fully parsed configuration for a public-source search.
+
+    Attributes
+    ----------
+    paths : PublicSearchPathsConfig
+        Test-set sources and report destination.
+    columns : ColumnsConfig
+        SMILES and identifier column configuration.
+    settings : SettingsConfig
+        Chemistry settings. The audit-only Tanimoto settings aren't used:
+        there is no training pool to compare against.
+    public_search : PublicSearchSettings
+        Which public source to search, and what counts as the endpoint.
+    config_path : Path | None
+        Path the configuration was loaded from, or ``None`` if it was
+        built from CLI flags or the Python API.
+    """
+
+    paths: PublicSearchPathsConfig
+    columns: ColumnsConfig
+    settings: SettingsConfig
+    public_search: PublicSearchSettings
+    config_path: Path | None
+
+
+def _optional_str_list(section: Mapping[str, object], key: str, section_name: str) -> list[str]:
+    """Fetch an optional list-of-strings key, defaulting to empty.
+
+    Parameters
+    ----------
+    section : Mapping[str, object]
+        The parsed TOML section.
+    key : str
+        The key to look up.
+    section_name : str
+        Name of the section, used only in error messages.
+
+    Returns
+    -------
+    list[str]
+        The list of strings, or an empty list if the key is absent.
+
+    Raises
+    ------
+    ConfigError
+        If the key is present but not a list of strings.
+    """
+    if key not in section:
+        return []
+    value = section[key]
+    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+        raise ConfigError(f"'{key}' in [{section_name}] must be a list of strings.")
+    return list(value)
+
+
+def parse_public_search(settings_raw: Mapping[str, object]) -> PublicSearchSettings:
+    """Parse and validate the ``[public_search]`` section.
+
+    Parameters
+    ----------
+    settings_raw : Mapping[str, object]
+        The ``[public_search]`` section (or the equivalent CLI flags).
+
+    Returns
+    -------
+    PublicSearchSettings
+        The validated public-search settings.
+
+    Raises
+    ------
+    ConfigError
+        If ``chembl_sqlite`` is missing or empty, a list key isn't a list
+        of strings, or no endpoint matcher is given.
+    """
+    chembl_sqlite = _require(dict(settings_raw), "chembl_sqlite", "public_search")
+    if not isinstance(chembl_sqlite, (str, Path)) or not str(chembl_sqlite):
+        raise ConfigError("'chembl_sqlite' in [public_search] must be a non-empty path.")
+
+    settings = PublicSearchSettings(
+        chembl_sqlite=str(chembl_sqlite),
+        match_connectivity=bool(settings_raw.get("match_connectivity", True)),
+        assay_chembl_ids=_optional_str_list(settings_raw, "assay_chembl_ids", "public_search"),
+        target_chembl_ids=_optional_str_list(settings_raw, "target_chembl_ids", "public_search"),
+        target_names=_optional_str_list(settings_raw, "target_names", "public_search"),
+        standard_types=_optional_str_list(settings_raw, "standard_types", "public_search"),
+        target_types=(
+            _optional_str_list(settings_raw, "target_types", "public_search")
+            if "target_types" in settings_raw
+            else ["SINGLE PROTEIN"]
+        ),
+    )
+    if not settings.target_types:
+        raise ConfigError(
+            "'target_types' in [public_search] must not be empty; omit it to keep the "
+            "default of single-protein targets only."
+        )
+    if not (settings.assay_chembl_ids or settings.target_chembl_ids or settings.target_names):
+        raise ConfigError(
+            "[public_search] needs at least one of 'assay_chembl_ids', "
+            "'target_chembl_ids' or 'target_names': without an endpoint to match, "
+            "a test compound being in ChEMBL is not leakage and the search can only "
+            "report presence."
+        )
+    return settings
+
+
+def load_public_search_config(config_path: str | Path) -> PublicSearchConfig:
+    """Load and validate a ``public-search`` TOML configuration file.
+
+    The schema matches the audit's, except that ``[paths]`` takes only
+    ``test_files``, the train/test-only settings aren't allowed, and a
+    ``[public_search]`` section says which source to search and what the
+    challenge endpoint is.
+
+    Parameters
+    ----------
+    config_path : str | Path
+        Path to the TOML configuration file.
+
+    Returns
+    -------
+    PublicSearchConfig
+        The parsed and validated configuration.
+
+    Raises
+    ------
+    ConfigError
+        If the file is missing, not valid TOML, missing a required
+        section or key, names a training pool, or contains an
+        out-of-range or audit-only setting.
+    """
+    config_path = Path(config_path)
+    raw = _load_toml(config_path)
+    paths_raw = raw["paths"]
+    if "train_files" in paths_raw:
+        raise ConfigError(
+            f"{config_path} names a training pool ([paths] train_files). A public-search "
+            f"compares the test set against a public database, not against train. "
+            f"Run it as an audit with: challenge-data-checker {config_path}"
+        )
+    if "public_search" not in raw:
+        raise ConfigError("Config is missing required [public_search] section.")
+    settings_raw = raw.get("settings", {})
+    reject_audit_only_settings(settings_raw)
+
+    report_output = paths_raw.get("report_output")
+    paths = PublicSearchPathsConfig(
+        test_files=_require_str_list(paths_raw, "test_files", "paths"),
+        report_output=None if report_output is None else str(report_output),
+    )
+    return PublicSearchConfig(
+        paths=paths,
+        columns=parse_columns(raw["columns"]),
+        settings=parse_settings(settings_raw, paths.report_output),
+        public_search=parse_public_search(raw["public_search"]),
+        config_path=config_path,
+    )

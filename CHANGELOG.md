@@ -4,6 +4,67 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); tagged releases use
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **`public-search` command**: searches a local ChEMBL SQLite release for a
+  blinded test set, to find out whether its measurements are already public
+  (#18). A local release is used rather than the REST API so the test set
+  never leaves the machine, and so the report can cite the release it
+  searched; only `sqlite3` from the standard library is needed, so this adds
+  no dependency.
+  - Presence in ChEMBL is reported as a count and a list, never as a
+    finding: most drug-like compounds appear somewhere.
+  - A finding needs a public record measuring the challenge endpoint, named
+    with `assay_chembl_ids`, `target_chembl_ids` or `target_names`.
+  - Salt forms are matched through ChEMBL's `molecule_hierarchy`
+    (`parent_molregno`) against the salt-stripped parent the checker already
+    computes, and stereochemistry differences through the InChIKey
+    connectivity block. Connectivity matching is on by default
+    (`--no-match-connectivity` turns it off): the lookup is a range scan of
+    ChEMBL's index on `standard_inchi_key`, not a table scan, and a match
+    on connectivity alone is flagged rather than blocking.
+  - New finding types, tiered by rule 3: `public_assay_overlap` (FAIL),
+    `public_assay_stereo_overlap` (WARN) and `public_target_type_overlap`
+    (WARN).
+  - Findings are grouped by ChEMBL document, so a single paper covering much
+    of the test set stands out.
+  - Available as `challenge-data-checker public-search`, with a
+    `[public_search]` config section or equivalent flags, and as
+    `search_public()` in the Python API.
+  - An activity ChEMBL marks as never measured is not a finding: an
+    `activity_comment` of "Not Determined", "Not tested" or "Inconclusive"
+    means the endpoint was looked at, not measured, so no answer is
+    exposed. That is the only thing skipped - a text result in
+    `standard_text_value`, such as "Not active", is an answer and so a
+    finding.
+  - ChEMBL's curation flags on an activity are reported, not acted on. A
+    `data_validity_comment` ("Potential transcription error") leaves the
+    finding standing, with the flag shown: a wrong number in a public paper
+    still unblinds the compound. A `potential_duplicate` row stays a
+    finding too, but is excluded from the `by_document` counts, since
+    crediting a review for the work it cites inflates a paper's apparent
+    share of the test set.
+  - The ChEMBL target IDs each `target_names` entry resolved to are
+    recorded in the report as `resolved_targets` and shown in the summary,
+    so a protein complex or family reached through a shared component is
+    visible, as is a name that matched nothing.
+  - A measurement is cited to the activity's own document, which ChEMBL
+    permits to differ from its assay's.
+  - Each test row is reported in exactly one finding (#4), while the
+    per-document summary reads every match, so a paper is never dropped
+    because another representation reported the same row.
+  - `target_names` resolves to single-protein targets by default;
+    `target_types` widens it. In ChEMBL 37, `CYP3A4` also resolves to three
+    protein families, up to every cytochrome P450.
+  - The release is read from the `version` row named like `ChEMBL_37`.
+    Real releases list their tool versions there too, including one that
+    also starts with "ChEMBL".
+  - Reports carry `"mode": "public_search"`.
+  - Needs ChEMBL 26 or newer, which is where `standard_text_value` was
+    added to the `activities` table.
+
 ## [0.4.0] - 2026-10-23
 
 A large release: severity tiers with a three-state result and CI-friendly

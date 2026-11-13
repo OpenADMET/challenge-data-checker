@@ -9,7 +9,9 @@ and a tier: **FAIL** (blocking: the split can't be released as is) or
    combine sources or hold replicates the user has to resolve), FAIL in test
    (the test set must be scoreable ground truth).
 3. Exact leakage is FAIL; non-exact leakage (only the stereochemistry
-   differs, or Tanimoto similarity at the default threshold) is WARN.
+   differs, or Tanimoto similarity at the default threshold) is WARN. The
+   same rule tiers leakage into a public database, where "exact" also
+   requires the public record to be one the configuration named outright.
 4. Heuristic quality flags are WARN.
 
 Findings are counted by distinct rows, not by how many checks fired (#4):
@@ -34,7 +36,10 @@ from challenge_data_checker.report_types import (
     Location,
     NamespaceIssues,
     PerPool,
+    PublicLeakageFinding,
+    PublicMatchType,
     QualityFlags,
+    Representation,
     Status,
     TanimotoFinding,
     TierSummary,
@@ -87,6 +92,15 @@ TIERS: dict[str, TierRule] = {
     "tanimoto_similarity": lambda ctx: (
         Severity.WARN if ctx.max_train_test_similarity >= 1.0 else Severity.FAIL
     ),
+    # Leakage into a public database (rule 3, applied to the public-search
+    # mode). The tier depends on both axes of the match: how strong the
+    # evidence is that the public record measures the challenge endpoint, and
+    # how exactly the structure matched. Only a configured assay/target ID on
+    # an exact or salt-form structure match blocks; a target resolved from a
+    # name, or a connectivity-only structure match, is flagged for review.
+    "public_assay_overlap": Severity.FAIL,
+    "public_assay_stereo_overlap": Severity.WARN,
+    "public_target_type_overlap": Severity.WARN,
     # The same structure written differently, e.g. by two processing pipelines
     "inconsistent_smiles": Severity.WARN,
     # Data curation within a pool (rule 2)
@@ -451,3 +465,55 @@ def summarise_tiers(
     blocking, flagged = tiers[Severity.FAIL], tiers[Severity.WARN]
     status: Status = "FAIL" if blocking["findings"] else "WARN" if flagged["findings"] else "PASS"
     return status, blocking, flagged
+
+
+def public_finding_type(representation: Representation, match_type: PublicMatchType) -> str:
+    """Map a public-source match to its finding type.
+
+    The tier depends on both axes of the match (see rule 3). A configured
+    assay or target ID on an exact or salt-form structure match is the only
+    combination that blocks: the endpoint is certain and the structure is
+    the test compound. Weaken either axis, by resolving the target from a
+    name or by matching only the InChIKey connectivity block, and the
+    finding is flagged for a human instead.
+
+    Parameters
+    ----------
+    representation : Representation
+        Which structural representation matched, from
+        ``PUBLIC_SEARCH_REPRESENTATIONS``.
+    match_type : PublicMatchType
+        How the endpoint was established, from ``PUBLIC_MATCH_TYPES``.
+
+    Returns
+    -------
+    str
+        ``public_target_type_overlap``, ``public_assay_stereo_overlap`` or
+        ``public_assay_overlap``.
+    """
+    if match_type == "target_type":
+        return "public_target_type_overlap"
+    if representation in STEREO_INSENSITIVE_REPRESENTATIONS:
+        return "public_assay_stereo_overlap"
+    return "public_assay_overlap"
+
+
+def collect_public_findings(findings: Iterable[PublicLeakageFinding]) -> Iterator[Finding]:
+    """Reduce public-source search results to typed findings with their rows.
+
+    Parameters
+    ----------
+    findings : Iterable[PublicLeakageFinding]
+        The report's ``findings``.
+
+    Yields
+    ------
+    Finding
+        One finding per reported match, before any merging.
+    """
+    for finding in findings:
+        yield Finding(
+            public_finding_type(finding["representation"], finding["match_type"]),
+            None,
+            _rows(finding["test_occurrences"]),
+        )

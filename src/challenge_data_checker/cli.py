@@ -1,10 +1,12 @@
 """Command-line entry point for challenge-data-checker.
 
-Two commands share one executable:
+Three commands share one executable:
 
 - ``challenge-data-checker config.toml`` audits a train/test split.
 - ``challenge-data-checker check ...`` checks a single dataset, configured
   either with ``--config check.toml`` or entirely with flags.
+- ``challenge-data-checker public-search ...`` searches a public database
+  for a blinded test set, to find out whether it is already public.
 """
 
 import argparse
@@ -17,14 +19,23 @@ from challenge_data_checker.config import (
     CheckConfig,
     CheckPathsConfig,
     ConfigError,
+    PublicSearchConfig,
+    PublicSearchPathsConfig,
     load_check_config,
     load_config,
+    load_public_search_config,
     parse_columns,
+    parse_public_search,
     parse_settings,
 )
-from challenge_data_checker.core import run_audit, run_check
+from challenge_data_checker.core import run_audit, run_check, run_public_search
 from challenge_data_checker.io_utils import ColumnResolutionError
-from challenge_data_checker.report_types import CheckReport, Report, Status
+from challenge_data_checker.report_types import (
+    CheckReport,
+    PublicSearchReport,
+    Report,
+    Status,
+)
 
 # Process exit codes. 1 means the audit couldn't run at all (including a
 # command-line usage error); 2 means it ran and found something that should
@@ -100,7 +111,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
         description=(
             "Audit ML benchmarking train/test splits for chemical data leakage, "
             "duplicates, and data quality issues. To check a single dataset "
-            "without a split, run `challenge-data-checker check --help`."
+            "without a split, run `challenge-data-checker check --help`. To find "
+            "out whether a blinded test set is already public, run "
+            "`challenge-data-checker public-search --help`."
         ),
         epilog=_EXIT_CODES_HELP,
     )
@@ -352,6 +365,8 @@ def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if argv and argv[0] == "check":
         return check_main(argv[1:])
+    if argv and argv[0] == "public-search":
+        return public_search_main(argv[1:])
 
     parser = build_arg_parser()
     args = parser.parse_args(argv)
@@ -359,6 +374,228 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         report = run(args.config)
+    except _RUN_ERRORS as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    return _exit_code(report["summary"]["status"], args.strict)
+
+
+def build_public_search_arg_parser() -> argparse.ArgumentParser:
+    """Build the command-line argument parser for the public-source search.
+
+    Every data/setting flag maps 1:1 to a key of the public-search TOML
+    config, so either form can express any search.
+
+    Returns
+    -------
+    argparse.ArgumentParser
+        The configured argument parser.
+    """
+    parser = _ArgumentParser(
+        prog="challenge-data-checker public-search",
+        description=(
+            "Search a public database (a local ChEMBL release) for a blinded test "
+            "set, to find out whether its measurements are already public. A test "
+            "compound merely being in ChEMBL is not leakage, so name the challenge "
+            "endpoint with at least one of --assay-chembl-ids, --target-chembl-ids "
+            "or --target-names. Configure it with --config, or with the data and "
+            "setting flags, not both."
+        ),
+        epilog=_EXIT_CODES_HELP,
+    )
+    parser.add_argument("--config", help="Path to a public-search TOML configuration file.")
+    data = parser.add_argument_group("data and settings (instead of --config)")
+    data.add_argument(
+        "--test-files", nargs="+", help="Test-set data files or URLs (paths.test_files)."
+    )
+    data.add_argument("--chembl-sqlite", help="Path to a local ChEMBL SQLite release.")
+    data.add_argument(
+        "--assay-chembl-ids",
+        nargs="+",
+        help="ChEMBL assay IDs measuring the challenge endpoint (a match is blocking).",
+    )
+    data.add_argument(
+        "--target-chembl-ids",
+        nargs="+",
+        help="ChEMBL target IDs for the challenge endpoint (a match is blocking).",
+    )
+    data.add_argument(
+        "--target-names",
+        nargs="+",
+        help="Target names or gene symbols to resolve, e.g. CYP3A4 (a match is flagged).",
+    )
+    data.add_argument(
+        "--standard-types",
+        nargs="+",
+        help="Allowed standard_type values for a --target-names match, e.g. IC50 Ki.",
+    )
+    data.add_argument(
+        "--target-types",
+        nargs="+",
+        help=(
+            "ChEMBL target types a --target-names entry may resolve to "
+            '(default: "SINGLE PROTEIN").'
+        ),
+    )
+    data.add_argument(
+        "--match-connectivity",
+        action=argparse.BooleanOptionalAction,
+        help=(
+            "Also match on InChIKey connectivity block, which catches differing or "
+            "undefined stereochemistry (default: on; a match is flagged, not blocking)."
+        ),
+    )
+    data.add_argument("--smiles-column", help="SMILES column name (default: SMILES).")
+    data.add_argument("--identifier-columns", nargs="+", help="Identifier column names.")
+    data.add_argument(
+        "--tautomer-standardisation",
+        action="store_const",
+        const=True,
+        help="Canonicalise tautomers before comparing molecules.",
+    )
+    data.add_argument(
+        "--strip-salts",
+        action=argparse.BooleanOptionalAction,
+        help="Also match a compound by its salt-stripped parent (default: on).",
+    )
+    data.add_argument("--report-output", help="Path to write the full report to (optional).")
+    data.add_argument("--report-format", help='"json" or "txt" (default: from --report-output).')
+    _add_run_options(parser)
+    return parser
+
+
+# public-search flags that set data or settings, and so can't be combined
+# with --config.
+_PUBLIC_SEARCH_DATA_FLAGS = (
+    "test_files",
+    "chembl_sqlite",
+    "assay_chembl_ids",
+    "target_chembl_ids",
+    "target_names",
+    "standard_types",
+    "target_types",
+    "match_connectivity",
+    "smiles_column",
+    "identifier_columns",
+    "tautomer_standardisation",
+    "strip_salts",
+    "report_output",
+    "report_format",
+)
+
+
+def public_search_config_from_args(args: argparse.Namespace) -> PublicSearchConfig:
+    """Build a public-search configuration from parsed ``public-search`` flags.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        The parsed ``public-search`` arguments, without ``--config``.
+
+    Returns
+    -------
+    PublicSearchConfig
+        The validated configuration, built with the same parsers as a TOML
+        config.
+
+    Raises
+    ------
+    ConfigError
+        If ``--test-files`` or ``--chembl-sqlite`` is missing, no endpoint
+        matcher is given, or a setting is invalid.
+    """
+    if not args.test_files:
+        raise ConfigError("public-search needs either --config or --test-files.")
+    if not args.chembl_sqlite:
+        raise ConfigError("public-search needs --chembl-sqlite (a local ChEMBL release).")
+    settings_raw = {
+        key: getattr(args, key)
+        for key in (
+            "tautomer_standardisation",
+            "strip_salts",
+            "report_format",
+        )
+        if getattr(args, key) is not None
+    }
+    return PublicSearchConfig(
+        paths=PublicSearchPathsConfig(test_files=args.test_files, report_output=args.report_output),
+        columns=parse_columns(
+            {
+                "smiles_column": args.smiles_column or "SMILES",
+                "identifier_columns": args.identifier_columns or [],
+            }
+        ),
+        settings=parse_settings(settings_raw, args.report_output),
+        public_search=parse_public_search(
+            {
+                "chembl_sqlite": args.chembl_sqlite,
+                # Omitted rather than coerced, so the flag's absence leaves
+                # the setting's own default in place instead of forcing it off.
+                **(
+                    {}
+                    if args.match_connectivity is None
+                    else {"match_connectivity": args.match_connectivity}
+                ),
+                "assay_chembl_ids": args.assay_chembl_ids or [],
+                "target_chembl_ids": args.target_chembl_ids or [],
+                "target_names": args.target_names or [],
+                "standard_types": args.standard_types or [],
+                **({"target_types": args.target_types} if args.target_types else {}),
+            }
+        ),
+        config_path=None,
+    )
+
+
+def run_public_search_from_args(args: argparse.Namespace) -> PublicSearchReport:
+    """Run a public-source search from parsed ``public-search`` arguments.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        The parsed ``public-search`` arguments.
+
+    Returns
+    -------
+    PublicSearchReport
+        The JSON-serialisable public-search report.
+    """
+    config = (
+        load_public_search_config(args.config)
+        if args.config
+        else public_search_config_from_args(args)
+    )
+    return run_public_search(config)
+
+
+def public_search_main(argv: list[str]) -> int:
+    """Parse ``public-search`` arguments and run the public-source search.
+
+    Parameters
+    ----------
+    argv : list[str]
+        Arguments after ``public-search``.
+
+    Returns
+    -------
+    int
+        The process exit code (see ``main``).
+    """
+    parser = build_public_search_arg_parser()
+    args = parser.parse_args(argv)
+    if args.config:
+        clashing = [f for f in _PUBLIC_SEARCH_DATA_FLAGS if getattr(args, f) is not None]
+        if clashing:
+            flags = ", ".join("--" + f.replace("_", "-") for f in clashing)
+            print(
+                f"Error: --config can't be combined with data or setting flags ({flags}).",
+                file=sys.stderr,
+            )
+            return EXIT_ERROR
+    _configure_logging(args.verbose)
+
+    try:
+        report = run_public_search_from_args(args)
     except _RUN_ERRORS as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return EXIT_ERROR
