@@ -241,6 +241,21 @@ def test_print_summary_runs_without_error(tmp_path, capsys):
     assert report["generated_at"] in captured.out
 
 
+@pytest.mark.parametrize("report_output", ["out/[run 1]/report.json", "out/[/]/report.json"])
+def test_print_summary_report_path_is_not_read_as_markup(tmp_path, capsys, report_output):
+    # A path segment in square brackets looks like rich markup: unescaped it is
+    # swallowed as a style tag (or raises MarkupError, for "[/]").
+    config = make_config(tmp_path)
+    train = [make_record("train", 0, "CCO", "CCO", "IK1")]
+    test = [make_record("test", 0, "CCN", "CCN", "IK2")]
+    report = build_report(config, train, test, [])
+
+    print_summary(report, report_output)
+
+    captured = capsys.readouterr()
+    assert report_output in captured.out
+
+
 def test_build_report_counts_stereo_only_overlap_separately(tmp_path):
     # Train has L-alanine; test has L-alanine (exact) and the racemate
     # (same connectivity, different stereo): one exact and one stereo-only
