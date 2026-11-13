@@ -130,7 +130,8 @@ def index_records(
         well. Mirrors the audit's ``strip_salts`` setting.
     match_connectivity : bool
         Whether to also look compounds up by InChIKey connectivity block,
-        which catches differing stereochemistry but is the slowest lookup.
+        which catches differing or undefined stereochemistry. On by
+        default; such a match is flagged, never blocking.
 
     Returns
     -------

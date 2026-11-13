@@ -531,8 +531,12 @@ class PublicSearchSettings:
         machine, and so the report can cite a release number.
     match_connectivity : bool
         Whether to also match on the InChIKey connectivity block, which
-        catches differing or undefined stereochemistry. Off by default: it
-        is the slowest lookup, since no index covers an InChIKey prefix.
+        catches differing or undefined stereochemistry. On by default:
+        undefined stereochemistry is one of the two leakage modes seen in
+        practice, and the lookup is a range scan of ChEMBL's InChIKey index
+        rather than a table scan, so leaving it off buys little. A match is
+        only ever flagged, never blocking, since it may be a deliberate
+        stereo split.
     assay_chembl_ids : list[str]
         ChEMBL assay IDs that measure the challenge endpoint. A match
         blocks.
@@ -554,7 +558,7 @@ class PublicSearchSettings:
     """
 
     chembl_sqlite: str | Path
-    match_connectivity: bool = False
+    match_connectivity: bool = True
     assay_chembl_ids: list[str] = field(default_factory=list)
     target_chembl_ids: list[str] = field(default_factory=list)
     target_names: list[str] = field(default_factory=list)
@@ -644,7 +648,7 @@ def parse_public_search(settings_raw: Mapping[str, object]) -> PublicSearchSetti
 
     settings = PublicSearchSettings(
         chembl_sqlite=str(chembl_sqlite),
-        match_connectivity=bool(settings_raw.get("match_connectivity", False)),
+        match_connectivity=bool(settings_raw.get("match_connectivity", True)),
         assay_chembl_ids=_optional_str_list(settings_raw, "assay_chembl_ids", "public_search"),
         target_chembl_ids=_optional_str_list(settings_raw, "target_chembl_ids", "public_search"),
         target_names=_optional_str_list(settings_raw, "target_names", "public_search"),

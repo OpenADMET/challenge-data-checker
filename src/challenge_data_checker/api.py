@@ -234,7 +234,7 @@ def search_public(
     target_names: Sequence[str] | None = None,
     standard_types: Sequence[str] | None = None,
     target_types: Sequence[str] | None = None,
-    match_connectivity: bool = False,
+    match_connectivity: bool = True,
     smiles_column: str = "SMILES",
     identifier_columns: Sequence[str] | None = None,
     tautomer_standardisation: bool = False,
@@ -279,8 +279,9 @@ def search_public(
         to. Defaults to single proteins only.
     match_connectivity : bool
         Whether to also match on the InChIKey connectivity block, catching
-        differing or undefined stereochemistry. Off by default: it is the
-        slowest lookup.
+        differing or undefined stereochemistry. On by default; such a match
+        is flagged, not blocking, since it may be a deliberate stereo
+        split.
     smiles_column : str
         Name of the SMILES column, resolved per source as in ``audit``.
     identifier_columns : Sequence[str] | None

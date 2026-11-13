@@ -10,6 +10,8 @@ from challenge_data_checker.config import ConfigError, load_public_search_config
 
 CAFFEINE = "Cn1c(=O)c2c(ncn2C)n(C)c1=O"
 OCTANOL = "CCCCCCCCO"
+# ChEMBL holds the racemate, so this only matches on connectivity.
+S_IBUPROFEN = "CC(C)Cc1ccc([C@@H](C)C(=O)O)cc1"
 
 
 @pytest.fixture(scope="module")
@@ -216,6 +218,67 @@ def test_python_api_matches_the_cli(tmp_path, chembl, capsys):
     assert report["summary"]["status"] == "FAIL"
     assert report["summary"]["total_test_rows"] == 2
     assert len(report["findings"]) == 1
+
+
+def test_cli_and_api_match_connectivity_by_default(tmp_path, chembl, capsys):
+    # The flag's absence must leave the default on, not coerce it off, in
+    # both front ends. Negative control for the default: flipping it back
+    # reports match_connectivity false here.
+    stereo = tmp_path / "stereo.csv"
+    pd.DataFrame({"SMILES": [S_IBUPROFEN], "compound_id": ["T1"]}).to_csv(stereo, index=False)
+    code = main(
+        [
+            "public-search",
+            "--test-files",
+            str(stereo),
+            "--chembl-sqlite",
+            str(chembl),
+            "--target-chembl-ids",
+            CYP3A4_TARGET,
+            "--report-output",
+            str(tmp_path / "default.json"),
+        ]
+    )
+    capsys.readouterr()
+    # Flagged, not blocking: the match is on connectivity alone.
+    assert code == EXIT_OK
+    report = json.loads((tmp_path / "default.json").read_text())
+    assert report["config"]["match_connectivity"] is True
+    assert report["summary"]["status"] == "WARN"
+
+    api_report = search_public(
+        pd.DataFrame({"SMILES": [S_IBUPROFEN]}),
+        chembl_sqlite=chembl,
+        target_chembl_ids=[CYP3A4_TARGET],
+        print_report=False,
+    )
+    capsys.readouterr()
+    assert api_report["config"]["match_connectivity"] is True
+    assert api_report["summary"]["status"] == "WARN"
+
+
+def test_cli_can_turn_connectivity_matching_off(tmp_path, chembl, capsys):
+    stereo = tmp_path / "stereo.csv"
+    pd.DataFrame({"SMILES": [S_IBUPROFEN], "compound_id": ["T1"]}).to_csv(stereo, index=False)
+    code = main(
+        [
+            "public-search",
+            "--test-files",
+            str(stereo),
+            "--chembl-sqlite",
+            str(chembl),
+            "--target-chembl-ids",
+            CYP3A4_TARGET,
+            "--no-match-connectivity",
+            "--report-output",
+            str(tmp_path / "off.json"),
+        ]
+    )
+    capsys.readouterr()
+    assert code == EXIT_OK
+    report = json.loads((tmp_path / "off.json").read_text())
+    assert report["config"]["match_connectivity"] is False
+    assert report["summary"]["status"] == "PASS"
 
 
 def test_python_api_needs_an_endpoint_matcher(chembl):

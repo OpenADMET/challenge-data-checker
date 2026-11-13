@@ -165,6 +165,36 @@ def test_stereo_difference_matches_only_on_connectivity_and_is_flagged(chembl):
     assert on["summary"]["flagged"]["by_type"]["public_assay_stereo_overlap"]["findings"] == 1
 
 
+def test_connectivity_matching_is_on_unless_turned_off(chembl):
+    # Undefined stereochemistry is one of the two leakage modes seen in
+    # practice, so a default run has to catch it. Negative control for the
+    # default: with match_connectivity off again, this search passes.
+    default = search(chembl, [S_IBUPROFEN])
+    assert default["config"]["match_connectivity"] is True
+    assert matches(default) == [("inchikey_connectivity", "explicit_id")]
+    assert default["summary"]["status"] == "WARN"
+
+    assert parse_public_search(
+        {"chembl_sqlite": "c.sqlite", "target_names": ["CYP3A4"]}
+    ).match_connectivity
+    assert not parse_public_search(
+        {"chembl_sqlite": "c.sqlite", "target_names": ["CYP3A4"], "match_connectivity": False}
+    ).match_connectivity
+
+
+def test_a_default_connectivity_match_is_flagged_while_exact_stereo_blocks(chembl):
+    # The two tiers of the default, in one place: the same compound found
+    # with its stereochemistry intact must block, while finding only its
+    # connectivity must not.
+    exact = search(chembl, [RACEMIC_IBUPROFEN])
+    assert exact["summary"]["status"] == "FAIL"
+    assert matches(exact) == [("inchikey", "explicit_id")]
+
+    stereo = search(chembl, [S_IBUPROFEN])
+    assert stereo["summary"]["status"] == "WARN"
+    assert matches(stereo) == [("inchikey_connectivity", "explicit_id")]
+
+
 def test_target_resolved_from_a_gene_symbol_is_flagged_not_blocking(chembl):
     report = search(
         chembl,

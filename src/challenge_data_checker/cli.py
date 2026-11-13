@@ -439,9 +439,11 @@ def build_public_search_arg_parser() -> argparse.ArgumentParser:
     )
     data.add_argument(
         "--match-connectivity",
-        action="store_const",
-        const=True,
-        help="Also match on InChIKey connectivity block (catches differing stereo; slower).",
+        action=argparse.BooleanOptionalAction,
+        help=(
+            "Also match on InChIKey connectivity block, which catches differing or "
+            "undefined stereochemistry (default: on; a match is flagged, not blocking)."
+        ),
     )
     data.add_argument("--smiles-column", help="SMILES column name (default: SMILES).")
     data.add_argument("--identifier-columns", nargs="+", help="Identifier column names.")
@@ -527,7 +529,13 @@ def public_search_config_from_args(args: argparse.Namespace) -> PublicSearchConf
         public_search=parse_public_search(
             {
                 "chembl_sqlite": args.chembl_sqlite,
-                "match_connectivity": bool(args.match_connectivity),
+                # Omitted rather than coerced, so the flag's absence leaves
+                # the setting's own default in place instead of forcing it off.
+                **(
+                    {}
+                    if args.match_connectivity is None
+                    else {"match_connectivity": args.match_connectivity}
+                ),
                 "assay_chembl_ids": args.assay_chembl_ids or [],
                 "target_chembl_ids": args.target_chembl_ids or [],
                 "target_names": args.target_names or [],

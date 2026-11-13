@@ -374,7 +374,7 @@ assay_chembl_ids = []                    # specific assays; a match is blocking
 target_names = ["CYP3A4"]                # resolved by name/gene symbol; flagged
 standard_types = ["IC50", "Ki", "Inhibition"]
 target_types = ["SINGLE PROTEIN"]        # what target_names may resolve to (default)
-match_connectivity = false               # also match ignoring stereochemistry
+match_connectivity = true                # also match ignoring stereochemistry (default)
 ```
 
 How a match is tiered depends on both how the structure matched and how
@@ -422,9 +422,14 @@ came in through a shared protein component is visible rather than left to
 be inferred from the findings. A name that matched nothing is listed too,
 since that search could only ever pass.
 
-`match_connectivity` is off by default because no index covers an InChIKey
-prefix, so that lookup scans `compound_structures` once. The exact and
-salt-form lookups are indexed and fast.
+`match_connectivity` is **on** by default. Undefined or differing
+stereochemistry is one of the two leakage modes seen in practice, so a test
+set drawn flat still has to match a ChEMBL entry drawn with its
+stereocentres; a match on connectivity alone is flagged (WARN), while an
+exact match, stereochemistry included, blocks (FAIL). The lookup is a range
+scan of ChEMBL's index on `standard_inchi_key`, not a table scan, so it
+costs little. Turn it off with `match_connectivity = false` or
+`--no-match-connectivity`.
 
 ### Using it from an AI agent
 
