@@ -1240,7 +1240,9 @@ def print_summary(report: Report | CheckReport, report_output: str | Path | None
     )
     renderables.append(_status_rule(s))
     if report_output is not None:
-        renderables.append(f"Full detailed report written to: [bold]{report_output}[/]")
+        renderables.append(
+            f"Full detailed report written to: [bold]{escape(str(report_output))}[/]"
+        )
 
     Console(highlight=False).print(Group(*renderables))
 
