@@ -313,7 +313,27 @@ LEFT JOIN molecule_dictionary md ON md.molregno = cs.molregno
 # molecule_hierarchy then fans out to every salt form sharing that parent:
 # a test set holding the free base matches a ChEMBL hydrochloride, and
 # vice versa.
+#
+# The compound the key names is selected on its own, in the first half,
+# rather than through its own molecule_hierarchy row, because a parent need
+# not have one. In ChEMBL 37, 93,019 of the 2,798,678 distinct
+# parent_molregno values have no row at all: typically a free base ChEMBL
+# registered only as the parent of the salt it was tested as. Reached
+# through the hierarchy alone, such a parent drops out of its own match, and
+# a parent with no row and no salt forms would not match at all. A compound
+# with no row is its own parent, as in ``_EXACT_SQL``. The second half adds
+# every other compound filed under it, so the parent is never counted twice.
 _PARENT_SQL = """
+SELECT k.key AS key,
+       parent.molregno AS molregno,
+       COALESCE(own.parent_molregno, parent.molregno) AS parent_molregno,
+       md.chembl_id AS chembl_id,
+       parent.standard_inchi_key AS standard_inchi_key
+FROM temp.cdc_keys_parent k
+JOIN compound_structures parent ON parent.standard_inchi_key = k.key
+LEFT JOIN molecule_hierarchy own ON own.molregno = parent.molregno
+LEFT JOIN molecule_dictionary md ON md.molregno = parent.molregno
+UNION ALL
 SELECT k.key AS key,
        cs.molregno AS molregno,
        parent.molregno AS parent_molregno,
@@ -324,6 +344,7 @@ JOIN compound_structures parent ON parent.standard_inchi_key = k.key
 JOIN molecule_hierarchy mh ON mh.parent_molregno = parent.molregno
 JOIN compound_structures cs ON cs.molregno = mh.molregno
 LEFT JOIN molecule_dictionary md ON md.molregno = cs.molregno
+WHERE mh.molregno <> parent.molregno
 """
 
 # A connectivity-only match, which catches undefined or differing

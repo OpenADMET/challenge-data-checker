@@ -62,7 +62,8 @@ PIPELINE_VERSION_NAME = "ChEMBL_Structure_Pipeline 1.2.0"
 P450_FAMILY_TARGET = "CHEMBL4523986"
 P450_FAMILY_ASSAY = "CHEMBL_ASSAY_P450"
 
-# Compounds, as (molregno, chembl_id, smiles, parent_molregno).
+# Compounds, as (molregno, chembl_id, smiles, parent_molregno), where a
+# parent_molregno of None means the compound has no molecule_hierarchy row.
 #
 #   1 caffeine                 - exact InChIKey match, CYP3A4 data -> blocking
 #   2 propranolol              - the parent of 3
@@ -82,7 +83,12 @@ P450_FAMILY_ASSAY = "CHEMBL_ASSAY_P450"
 #  13 naproxen                 - measured in document 4 and cited again in
 #                                document 1, the citation flagged as a
 #                                potential duplicate
-COMPOUNDS: tuple[tuple[int, str, str, int], ...] = (
+#  14 a quinoxaline free base  - the parent of 15 with no molecule_hierarchy
+#                                row of its own, as ChEMBL registers a parent
+#                                it only holds as a salt (93,019 parents in
+#                                ChEMBL 37, this one among them)
+#  15 its hydrochloride        - a salt whose parent is 14
+COMPOUNDS: tuple[tuple[int, str, str, int | None], ...] = (
     (1, "CHEMBL113", "Cn1c(=O)c2c(ncn2C)n(C)c1=O", 1),
     (2, "CHEMBL27", "CC(C)NCC(O)COc1cccc2ccccc12", 2),
     (3, "CHEMBL1200640", "CC(C)NCC(O)COc1cccc2ccccc12.Cl", 2),
@@ -96,6 +102,8 @@ COMPOUNDS: tuple[tuple[int, str, str, int], ...] = (
     (11, "CHEMBL1464", "CC(=O)CC(c1ccccc1)c1c(O)c2ccccc2oc1=O", 11),
     (12, "CHEMBL139", "O=C(O)Cc1ccccc1Nc1c(Cl)cccc1Cl", 12),
     (13, "CHEMBL154", "COc1ccc2cc([C@@H](C)C(=O)O)ccc2c1", 13),
+    (14, "CHEMBL7022", "Clc1nc2ccccc2nc1N1CCNCC1", None),
+    (15, "CHEMBL1743921", "Cl.Clc1nc2ccccc2nc1N1CCNCC1", 14),
 )
 
 
@@ -317,6 +325,8 @@ def build_fixture(path: str | Path) -> Path:
                    VALUES (?, ?, ?, ?)""",
                 (molregno, None, inchikey_of(smiles), smiles),
             )
+            if parent is None:
+                continue
             conn.execute(
                 """INSERT INTO molecule_hierarchy (molregno, parent_molregno, active_molregno)
                    VALUES (?, ?, ?)""",

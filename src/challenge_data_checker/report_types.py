@@ -506,8 +506,9 @@ class ChemblCompound(TypedDict):
 
     ``parent_molregno`` is the compound's parent in ``molecule_hierarchy``,
     which is the same as ``molregno`` for a compound that is already its own
-    parent. A salt and its free base share a parent, which is how a
-    ``parent_inchikey`` match reaches every salt form of one compound.
+    parent, including one with no ``molecule_hierarchy`` row at all. A salt
+    and its free base share a parent, which is how a ``parent_inchikey``
+    match reaches every salt form of one compound.
     """
 
     molregno: int

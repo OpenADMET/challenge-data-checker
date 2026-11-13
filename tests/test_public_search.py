@@ -152,6 +152,25 @@ def test_salt_form_match_goes_through_molecule_hierarchy(chembl):
     assert all(activity["target_chembl_id"] == CYP3A4_TARGET for activity in finding["activities"])
 
 
+def test_a_parent_with_no_hierarchy_row_is_still_its_own_parent(chembl):
+    # ChEMBL does not give every parent a self-referencing molecule_hierarchy
+    # row: compound 14 has none and is reached only as the parent of its
+    # hydrochloride, 15. A mesylate in the test set matches neither as drawn,
+    # so the salt-stripped parent key must find 14 itself as well as 15.
+    # Negative control: reach the parent only through the hierarchy and 14
+    # drops out of its own match.
+    _inchikey, parent = keys_of("Clc1nc2ccccc2nc1N1CCNCC1.CS(=O)(=O)O")
+    conn = connect(chembl)
+    try:
+        found = find_structures(conn, {"parent_inchikey": [parent]})
+    finally:
+        conn.close()
+    assert sorted((m.compound["chembl_id"], m.compound["parent_molregno"]) for m in found) == [
+        ("CHEMBL1743921", 14),
+        ("CHEMBL7022", 14),
+    ]
+
+
 def test_stereo_difference_matches_only_on_connectivity_and_is_flagged(chembl):
     # (S)-ibuprofen against racemic ibuprofen in ChEMBL: no exact or parent
     # match, so this is the case connectivity matching exists for.
