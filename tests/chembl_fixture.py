@@ -42,6 +42,9 @@ CYP3A4_ASSAY_3 = "CHEMBL_ASSAY_CYP3"
 CYP3A4_DOCUMENT = "CHEMBL_DOC_1"
 CYP3A4_DOCUMENT_2 = "CHEMBL_DOC_2"
 CYP3A4_DOCUMENT_3 = "CHEMBL_DOC_3"
+# The paper that first measured compound 13. Document 1 only cites it, which
+# ChEMBL flags as a potential duplicate, so only this one counts as coverage.
+CYP3A4_DOCUMENT_4 = "CHEMBL_DOC_4"
 
 # A release's version table is keyed by name and need not hold only the
 # database release, so a non-ChEMBL row is included, first, to prove the
@@ -73,6 +76,12 @@ P450_FAMILY_ASSAY = "CHEMBL_ASSAY_P450"
 #                                finding
 #  11 warfarin                 - a CYP3A4 result recorded as text with no
 #                                number, which is still an answer
+#  12 diclofenac               - its CYP3A4 number carries a
+#                                data_validity_comment, so the finding has to
+#                                survive and say so
+#  13 naproxen                 - measured in document 4 and cited again in
+#                                document 1, the citation flagged as a
+#                                potential duplicate
 COMPOUNDS: tuple[tuple[int, str, str, int], ...] = (
     (1, "CHEMBL113", "Cn1c(=O)c2c(ncn2C)n(C)c1=O", 1),
     (2, "CHEMBL27", "CC(C)NCC(O)COc1cccc2ccccc12", 2),
@@ -85,6 +94,8 @@ COMPOUNDS: tuple[tuple[int, str, str, int], ...] = (
     (9, "CHEMBL190", "Cn1c(=O)c2[nH]cnc2n(C)c1=O", 9),
     (10, "CHEMBL3", "CN1CCC[C@H]1c1cccnc1", 10),
     (11, "CHEMBL1464", "CC(=O)CC(c1ccccc1)c1c(O)c2ccccc2oc1=O", 11),
+    (12, "CHEMBL139", "O=C(O)Cc1ccccc1Nc1c(Cl)cccc1Cl", 12),
+    (13, "CHEMBL154", "COc1ccc2cc([C@@H](C)C(=O)O)ccc2c1", 13),
 )
 
 
@@ -113,6 +124,12 @@ class Activity(NamedTuple):
     activity_comment : str | None
         ChEMBL's note on the measurement, e.g. ``"Not Determined"`` for an
         endpoint that was looked at but never measured.
+    data_validity_comment : str | None
+        ChEMBL's curation flag on the number itself, e.g. ``"Potential
+        transcription error"``.
+    potential_duplicate : int
+        ``1`` where ChEMBL judges the row a repeat citation of an earlier
+        paper's value rather than a new measurement.
     """
 
     molregno: int
@@ -122,6 +139,8 @@ class Activity(NamedTuple):
     own_doc_id: int | None = None
     text_value: str | None = None
     activity_comment: str | None = None
+    data_validity_comment: str | None = None
+    potential_duplicate: int = 0
 
 
 # Activities.
@@ -138,6 +157,11 @@ class Activity(NamedTuple):
 #   9 theophylline    - an activity whose own doc_id differs from its assay's
 #  11 warfarin        - a CYP3A4 result held as text with no number, which is
 #                       an answer all the same
+#  12 diclofenac      - a CYP3A4 number ChEMBL flags as possibly transcribed
+#                       wrong, which is still a published answer
+#  13 naproxen        - measured once in document 4, and once more in document
+#                       1 as a repeat citation. Only document 4 should count
+#                       towards per-document coverage
 ACTIVITIES: tuple[Activity, ...] = (
     Activity(1, CYP3A4_ASSAY, "IC50", 45.0),
     Activity(3, CYP3A4_ASSAY, "IC50", 120.0),
@@ -150,6 +174,15 @@ ACTIVITIES: tuple[Activity, ...] = (
     # 10 nicotine - measured only against the whole P450 family target
     Activity(10, P450_FAMILY_ASSAY, "IC50", 50.0),
     Activity(11, CYP3A4_ASSAY, "Activity", text_value="Not active"),
+    Activity(
+        12,
+        CYP3A4_ASSAY,
+        "IC50",
+        5.0,
+        data_validity_comment="Potential transcription error",
+    ),
+    Activity(13, CYP3A4_ASSAY, "IC50", 155.0, own_doc_id=4),
+    Activity(13, CYP3A4_ASSAY, "IC50", 150.0, potential_duplicate=1),
 )
 
 _SCHEMA = """
@@ -211,6 +244,8 @@ CREATE TABLE activities (
     pchembl_value REAL,
     standard_text_value TEXT,
     activity_comment TEXT,
+    data_validity_comment TEXT,
+    potential_duplicate INTEGER,
     doc_id INTEGER
 );
 CREATE INDEX idx_act_molregno ON activities (molregno);
@@ -322,6 +357,7 @@ def build_fixture(path: str | Path) -> Path:
             CYP3A4_DOCUMENT: (1, "J Med Chem", 2019, "10.0000/fixture", "A CYP3A4 panel"),
             CYP3A4_DOCUMENT_2: (2, "J Pharm Sci", 2021, "10.0000/fixture2", "Another panel"),
             CYP3A4_DOCUMENT_3: (3, "Drug Metab Dispos", 2022, "10.0000/fixture3", "A third"),
+            CYP3A4_DOCUMENT_4: (4, "Xenobiotica", 2023, "10.0000/fixture4", "The original"),
         }
         for chembl_id, (doc_id, journal, year, doi, title) in documents.items():
             conn.execute(
@@ -351,8 +387,8 @@ def build_fixture(path: str | Path) -> Path:
                 """INSERT INTO activities
                    (activity_id, assay_id, molregno, standard_type, standard_relation,
                     standard_value, standard_units, pchembl_value, standard_text_value,
-                    activity_comment, doc_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    activity_comment, data_validity_comment, potential_duplicate, doc_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     activity_id,
                     assay_id,
@@ -364,6 +400,8 @@ def build_fixture(path: str | Path) -> Path:
                     None,
                     activity.text_value,
                     activity.activity_comment,
+                    activity.data_validity_comment,
+                    activity.potential_duplicate,
                     activity.own_doc_id if activity.own_doc_id is not None else assay_doc_id,
                 ),
             )

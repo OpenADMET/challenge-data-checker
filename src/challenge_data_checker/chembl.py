@@ -512,6 +512,12 @@ SELECT a.molregno AS molregno,
        -- Both are needed to tell a qualitative answer from a non-answer.
        a.standard_text_value AS standard_text_value,
        a.activity_comment AS activity_comment,
+       -- ChEMBL's own curation flags on the measurement. A validity comment
+       -- ("Potential transcription error") says the number may be wrong, not
+       -- that the endpoint was not measured; potential_duplicate says the row
+       -- is likely a repeat citation of an earlier paper's value.
+       a.data_validity_comment AS data_validity_comment,
+       a.potential_duplicate AS potential_duplicate,
        ass.chembl_id AS assay_chembl_id,
        ass.description AS assay_description,
        td.chembl_id AS target_chembl_id,
@@ -542,6 +548,8 @@ SELECT a.molregno AS molregno,
        a.pchembl_value AS pchembl_value,
        a.standard_text_value AS standard_text_value,
        a.activity_comment AS activity_comment,
+       a.data_validity_comment AS data_validity_comment,
+       a.potential_duplicate AS potential_duplicate,
        ass.chembl_id AS assay_chembl_id,
        ass.description AS assay_description,
        td.chembl_id AS target_chembl_id,
@@ -573,6 +581,33 @@ def _as_float(value: object) -> float | None:
         return float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return None
+
+
+def _as_flag(value: object) -> bool:
+    """Coerce a ChEMBL 0/1 flag column to a bool.
+
+    The numeric value decides, not Python truthiness: ``potential_duplicate``
+    is declared ``NUMBER(1)`` and arrives as an integer from an official
+    SQLite dump, but a third-party conversion can store it as the text
+    ``"0"``, which ``bool()`` would read as set.
+
+    Parameters
+    ----------
+    value : object
+        The raw column value.
+
+    Returns
+    -------
+    bool
+        ``True`` if the column holds a non-zero number, or a non-empty
+        value that is not a number at all.
+    """
+    if value is None:
+        return False
+    try:
+        return float(value) != 0.0  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return bool(str(value).strip())
 
 
 def find_activities(
@@ -647,6 +682,10 @@ def find_activities(
             "activity_comment": (
                 None if row["activity_comment"] is None else str(row["activity_comment"])
             ),
+            "data_validity_comment": (
+                None if row["data_validity_comment"] is None else str(row["data_validity_comment"])
+            ),
+            "potential_duplicate": _as_flag(row["potential_duplicate"]),
             "document_chembl_id": (
                 str(row["document_chembl_id"])
                 if "document_chembl_id" in columns and row["document_chembl_id"] is not None

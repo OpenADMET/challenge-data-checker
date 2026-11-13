@@ -527,6 +527,15 @@ class ChemblActivity(TypedDict):
 
     ``activity_comment`` is what separates a result from a non-result: an
     endpoint logged as "Not Determined" was looked at, not measured.
+
+    The last two are ChEMBL's curation flags, carried so a reviewer can
+    weigh the evidence rather than so the search can discard it.
+    ``data_validity_comment`` ("Potential transcription error", "Outside
+    typical range") says the number may be wrong - which is no reason to
+    hide the leak, since a wrong number in a public paper still unblinds the
+    compound. ``potential_duplicate`` says the row is likely a repeat
+    citation of an earlier paper's measurement, so counting it would inflate
+    that paper's share of the test set in ``by_document``.
     """
 
     assay_chembl_id: str | None
@@ -541,6 +550,8 @@ class ChemblActivity(TypedDict):
     pchembl_value: float | None
     standard_text_value: str | None
     activity_comment: str | None
+    data_validity_comment: str | None
+    potential_duplicate: bool
     document_chembl_id: str | None
     document_reference: str | None
 

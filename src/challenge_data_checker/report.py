@@ -1997,6 +1997,9 @@ def _fmt_activity(activity: ChemblActivity) -> str:
         The measurement, its target and assay, and its source document. A
         categorical result is shown where there is no numeric one, since
         ChEMBL records one or the other and a text result is an answer too.
+        ChEMBL's curation flags are appended where set, so a reviewer can
+        see that a number is suspect, or that a row only repeats an earlier
+        paper and so was left out of the per-document counts.
     """
     measurement = activity["standard_type"] or "?"
     if activity["standard_value"] is not None:
@@ -2016,6 +2019,10 @@ def _fmt_activity(activity: ChemblActivity) -> str:
         document = activity["document_chembl_id"]
         reference = activity["document_reference"]
         parts.append(f"doc={document}" + (f" ({reference})" if reference else ""))
+    if activity["data_validity_comment"]:
+        parts.append(f"data_validity={activity['data_validity_comment']}")
+    if activity["potential_duplicate"]:
+        parts.append("potential_duplicate (not counted by document)")
     return "; ".join(parts)
 
 

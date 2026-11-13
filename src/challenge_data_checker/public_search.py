@@ -570,6 +570,17 @@ def summarise_documents(
     papers, reached through its InChIKey and its salt-stripped parent,
     would silently drop one of them.
 
+    Activities ChEMBL flags as ``potential_duplicate`` are left out, because
+    this summary answers "how much of the test set does one paper hold?" and
+    a repeat citation of an earlier paper's number is not that paper
+    measuring the compound. Counting them credits a review for the work it
+    cites, which inflates exactly the number a reviewer acts on. They stay
+    in the findings: the compound really is unblinded either way, and
+    ``build_findings`` reports the measurement with the flag attached.
+
+    A document whose only evidence is a repeat citation therefore drops out
+    of the summary entirely, which is the point.
+
     Parameters
     ----------
     matches : Sequence[EndpointMatch]
@@ -588,7 +599,7 @@ def summarise_documents(
         rows = match.rows()
         for activity in match.activities:
             document = activity["document_chembl_id"]
-            if document is None:
+            if document is None or activity["potential_duplicate"]:
                 continue
             rows_by_document[document] |= rows
             if reference_by_document.get(document) is None:

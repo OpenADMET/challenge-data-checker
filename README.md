@@ -394,6 +394,15 @@ categorical outcomes such as "Not active" in `standard_text_value` with no
 number beside them, and a compound reported inactive against the
 challenge's endpoint is an answer and a leak like any other.
 
+ChEMBL's two curation flags on an activity are reported, not acted on. A
+`data_validity_comment` such as "Potential transcription error" means the
+number may be wrong, which is no reason to hide the leak - a wrong number
+in a public paper still unblinds the compound - so the finding stands with
+the flag shown beside it. A `potential_duplicate` row is a repeat citation
+of an earlier paper's measurement; it stays a finding too, but is left out
+of the `by_document` counts, since crediting a review for the work it cites
+inflates exactly the share a reviewer acts on.
+
 Only a named assay or target on an exact or salt-form structure match
 blocks. Resolving a target from a name is a guess, and a connectivity-only
 match may be a deliberate stereo split, so both are flagged for a human

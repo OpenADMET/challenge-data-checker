@@ -6,6 +6,7 @@ from chembl_fixture import (
     CYP3A4_DOCUMENT,
     CYP3A4_DOCUMENT_2,
     CYP3A4_DOCUMENT_3,
+    CYP3A4_DOCUMENT_4,
     CYP3A4_TARGET,
     OTHER_VERSION_NAME,
     P450_FAMILY_TARGET,
@@ -47,6 +48,10 @@ RACEMIC_IBUPROFEN = "CC(C)Cc1ccc(C(C)C(=O)O)cc1"
 PARACETAMOL = "CC(=O)Nc1ccc(O)cc1"
 # Its only CYP3A4 record is a text result with no number.
 WARFARIN = "CC(=O)CC(c1ccccc1)c1c(O)c2ccccc2oc1=O"
+# Its CYP3A4 number carries a data_validity_comment.
+DICLOFENAC = "O=C(O)Cc1ccccc1Nc1c(Cl)cccc1Cl"
+# Measured in document 4, cited again in document 1 as a potential duplicate.
+NAPROXEN = "COc1ccc2cc([C@@H](C)C(=O)O)ccc2c1"
 # Measured in one paper itself, and in another through its salt form.
 METOPROLOL_FREE_BASE = "CC(C)NCC(O)COc1ccc(CCOC)cc1"
 # Its activity's own doc_id differs from its assay's.
@@ -401,6 +406,45 @@ def test_a_text_only_result_is_a_leak(chembl):
     assert activity["standard_text_value"] == "Not active"
     # The rendering must show the result, not an empty measurement.
     assert "Activity = Not active" in format_report_as_text(report)
+
+
+def test_a_flagged_value_is_still_a_finding_and_says_so(chembl):
+    # ChEMBL's data_validity_comment says the number may be wrong, not that
+    # the endpoint was unmeasured. A wrong number in a public paper still
+    # unblinds the compound, so the finding stands and carries the flag.
+    report = search(chembl, [DICLOFENAC])
+    assert matches(report) == [("inchikey", "explicit_id")]
+    assert report["summary"]["status"] == "FAIL"
+    (activity,) = report["findings"][0]["activities"]
+    assert activity["data_validity_comment"] == "Potential transcription error"
+    assert "data_validity=Potential transcription error" in format_report_as_text(report)
+
+
+def test_a_repeat_citation_is_a_finding_but_not_document_coverage(chembl):
+    # Naproxen is measured in document 4 and cited again in document 1, the
+    # citation flagged potential_duplicate. by_document answers "how much of
+    # the test set does one paper hold?", and a citation is not that paper
+    # measuring the compound, so only document 4 may appear. Negative
+    # control: without the exclusion both documents are listed.
+    report = search(chembl, [NAPROXEN])
+    assert matches(report) == [("inchikey", "explicit_id")]
+    assert [summary["document_chembl_id"] for summary in report["by_document"]] == [
+        CYP3A4_DOCUMENT_4
+    ]
+    assert report["summary"]["total_documents"] == 1
+    # The duplicate is kept as evidence, and marked.
+    activities = report["findings"][0]["activities"]
+    assert [a["potential_duplicate"] for a in activities] == [False, True]
+    assert "potential_duplicate" in format_report_as_text(report)
+
+
+def test_a_repeat_citation_does_not_inflate_a_shared_document(chembl):
+    # The inflation the exclusion exists to stop: document 1 genuinely
+    # measures caffeine, and only cites naproxen. It must be credited with
+    # one test row, not two.
+    report = search(chembl, [CAFFEINE, NAPROXEN])
+    shares = {s["document_chembl_id"]: s["test_rows"] for s in report["by_document"]}
+    assert shares == {CYP3A4_DOCUMENT: 1, CYP3A4_DOCUMENT_4: 1}
 
 
 def test_activity_is_cited_to_its_own_document_not_its_assays(chembl):
