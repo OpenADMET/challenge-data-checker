@@ -16,7 +16,14 @@ from chembl_fixture import (
     build_fixture,
 )
 
-from challenge_data_checker.chembl import ChemblSourceError, connect, read_source
+from challenge_data_checker.chembl import (
+    _CONNECTIVITY_SQL,
+    ChemblSourceError,
+    _load_keys,
+    connect,
+    find_structures,
+    read_source,
+)
 from challenge_data_checker.chemistry import MoleculeProcessor
 from challenge_data_checker.config import (
     ColumnsConfig,
@@ -559,6 +566,61 @@ def test_resolved_targets_are_rendered_for_review(chembl, capsys):
     assert f"resolved CYP3A4          : ['{CYP3A4_TARGET}']" in format_report_as_text(report)
     print_public_search_summary(report, None)
     assert f"CYP3A4 -> {CYP3A4_TARGET}" in capsys.readouterr().out
+
+
+def test_the_connectivity_lookup_is_served_by_the_inchikey_index(chembl):
+    # The connectivity lookup is a range over standard_inchi_key precisely so
+    # ChEMBL's index on that column can serve it, with the small TEMP table
+    # driving the join. Negative control for that shape: a prefix test such
+    # as substr(standard_inchi_key, 1, 14) = k.key cannot use the index, so
+    # the plan scans compound_structures instead and this fails.
+    conn = connect(chembl)
+    try:
+        _load_keys(conn, "cdc_keys_connectivity", ["AAAAAAAAAAAAAA"])
+        plan = [str(row[-1]) for row in conn.execute("EXPLAIN QUERY PLAN " + _CONNECTIVITY_SQL)]
+    finally:
+        conn.close()
+    assert any(step.startswith("SCAN k") for step in plan), plan
+    searches = [step for step in plan if step.startswith("SEARCH cs")]
+    assert searches, plan
+    assert "idx_cs_inchikey" in searches[0], plan
+    assert "standard_inchi_key>" in searches[0], plan
+
+
+def test_the_connectivity_range_matches_exactly_one_connectivity_block(tmp_path, chembl):
+    # The boundary of the range form, which no real InChIKey can exercise
+    # because the checker computes them. A standard InChIKey is 14
+    # connectivity characters then '-', so the range ['<block>-', '<block>.')
+    # must take every stereo variant of the block and nothing else.
+    path = tmp_path / "boundary.sqlite"
+    path.write_bytes(chembl.read_bytes())
+    writable = sqlite3.connect(path)
+    keys = {
+        101: "AAAAAAAAAAAAAA-BBBBBBBBFV-N",
+        102: "AAAAAAAAAAAAAA-CCCCCCCCFV-S",  # same connectivity, other stereo
+        103: "AAAAAAAAAAAAAB-BBBBBBBBFV-N",  # the next connectivity block
+        104: "AAAAAAAAAAAAA-BBBBBBBBFV-N",  # a 13-character first block
+        105: "AAAAAAAAAAAAAAX-BBBBBBBBFV-N",  # a 15-character first block
+        106: "AAAAAAAAAAAAAA.BBBBBBBBFV-N",  # not '-' as the separator
+        107: "AAAAAAAAAAAAAA",  # a bare block, with no key after it
+        108: None,
+    }
+    for molregno, key in keys.items():
+        writable.execute(
+            "INSERT INTO compound_structures (molregno, standard_inchi_key) VALUES (?, ?)",
+            (molregno, key),
+        )
+    writable.commit()
+    writable.close()
+
+    conn = connect(path)
+    try:
+        found = find_structures(conn, {"inchikey_connectivity": ["AAAAAAAAAAAAAA"]})
+    finally:
+        conn.close()
+    # 105-107 are the rows the two forms disagree on: substr() would take
+    # them, the range does not. None of them is a standard InChIKey.
+    assert {match.compound["molregno"] for match in found} == {101, 102}
 
 
 def test_config_rejects_empty_target_types():

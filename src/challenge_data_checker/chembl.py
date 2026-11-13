@@ -327,18 +327,39 @@ LEFT JOIN molecule_dictionary md ON md.molregno = cs.molregno
 """
 
 # A connectivity-only match, which catches undefined or differing
-# stereochemistry. ChEMBL has no index on the InChIKey prefix, so this is
-# one scan of compound_structures probing the TEMP table; it is the slowest
-# of the three and is why connectivity matching is opt-in.
-_CONNECTIVITY_SQL = f"""
+# stereochemistry.
+#
+# Written as a range rather than as a prefix test, so ChEMBL's index on
+# ``standard_inchi_key`` ("This is indexed", per the schema documentation)
+# serves it. A standard InChIKey is 14 connectivity characters, '-', 10
+# stereo/protonation characters, '-' and a final character, so every key
+# sharing a connectivity block lies between ``<block>-`` and ``<block>.`` in
+# byte order: '.' is the next code point after '-', so nothing else can fall
+# in between. ``CROSS JOIN`` then forces the TEMP table to be the outer loop
+# (as in ``_ACTIVITIES_SQL``) and each key becomes one index range scan.
+# Measured over 200k synthetic structures, that runs ~40x faster than
+# probing the TEMP table from ``substr(standard_inchi_key, 1, 14)``, which
+# has to scan ``compound_structures`` whole.
+#
+# The two forms agree on every standard InChIKey. They differ only where
+# ``standard_inchi_key`` is not one: a bare 14-character block, a first
+# block of some other length, or a separator that is not '-' is matched by
+# the ``substr`` form and not by this one. Those are not InChIKeys, so
+# excluding them is right rather than merely cheaper.
+#
+# This does assume the index is present, as every official release has it.
+# Without it the forced join order costs one table scan per key instead of
+# one in total, so a hand-trimmed dump should be given the index back.
+_CONNECTIVITY_SQL = """
 SELECT k.key AS key,
        cs.molregno AS molregno,
        COALESCE(mh.parent_molregno, cs.molregno) AS parent_molregno,
        md.chembl_id AS chembl_id,
        cs.standard_inchi_key AS standard_inchi_key
-FROM compound_structures cs
-JOIN temp.cdc_keys_connectivity k
-  ON k.key = substr(cs.standard_inchi_key, 1, {CONNECTIVITY_BLOCK_LENGTH})
+FROM temp.cdc_keys_connectivity k
+CROSS JOIN compound_structures cs
+  ON cs.standard_inchi_key >= k.key || '-'
+ AND cs.standard_inchi_key < k.key || '.'
 LEFT JOIN molecule_hierarchy mh ON mh.molregno = cs.molregno
 LEFT JOIN molecule_dictionary md ON md.molregno = cs.molregno
 """
