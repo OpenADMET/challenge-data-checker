@@ -5,7 +5,8 @@ abstract: >-
   A command-line tool and Python API that audits machine learning benchmarking
   datasets (train/test splits) for chemical data leakage, duplicates, and data
   quality issues, using RDKit for structure canonicalisation and similarity
-  comparison.
+  comparison. It can also search a local ChEMBL release for whether a
+  blinded test set's measurements are already public.
 type: software
 authors:
   - name: "OpenADMET"

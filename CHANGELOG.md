@@ -4,13 +4,17 @@ All notable changes to this project are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); tagged releases use
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.5.0] - 2026-11-23
+
+Adds `public-search`, which looks a blinded test set up in a local ChEMBL
+release to find out whether its measurements are already public. Thanks to
+@arun-elr for the feature (#31) and the summary fix (#32).
 
 ### Added
 
 - **`public-search` command**: searches a local ChEMBL SQLite release for a
   blinded test set, to find out whether its measurements are already public
-  (#18). A local release is used rather than the REST API so the test set
+  (#18, #31). A local release is used rather than the REST API so the test set
   never leaves the machine, and so the report can cite the release it
   searched; only `sqlite3` from the standard library is needed, so this adds
   no dependency.
@@ -66,6 +70,20 @@ All notable changes to this project are recorded here. The format follows
   - Reports carry `"mode": "public_search"`.
   - Needs ChEMBL 26 or newer, which is where `standard_text_value` was
     added to the `activities` table.
+
+### Changed
+
+- README and agent skill: guidance on naming an ADME or cell-based endpoint,
+  which ChEMBL files under broad targets, and on triaging public-search
+  findings (similar assays, compounds with no label for the endpoint, and
+  ChEMBL-only coverage). The README now describes all three commands up
+  front.
+
+### Fixed
+
+- The summary dashboard printed the report path as Rich markup, so a path
+  containing square brackets lost them (`out/[run 1]/report.json`) or
+  crashed the summary (`out/[/]/report.json`). It is now escaped (#32).
 
 ## [0.4.0] - 2026-10-23
 
@@ -294,6 +312,9 @@ exit codes, salt-form and stereoisomer leakage detection, a single-dataset
 
 Initial release.
 
+[0.5.0]: https://github.com/OpenADMET/challenge-data-checker/releases/tag/v0.5.0
+[0.4.0]: https://github.com/OpenADMET/challenge-data-checker/releases/tag/v0.4.0
+[0.3.3]: https://github.com/OpenADMET/challenge-data-checker/releases/tag/v0.3.3
 [0.3.0]: https://github.com/OpenADMET/challenge-data-checker/releases/tag/v0.3.0
 [0.2.2]: https://github.com/OpenADMET/challenge-data-checker/releases/tag/v0.2.2
 [0.2.1]: https://github.com/OpenADMET/challenge-data-checker/releases/tag/v0.2.1

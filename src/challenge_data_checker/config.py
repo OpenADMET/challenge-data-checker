@@ -541,7 +541,9 @@ class PublicSearchSettings:
         ChEMBL assay IDs that measure the challenge endpoint. A match
         blocks.
     target_chembl_ids : list[str]
-        ChEMBL target IDs for the challenge endpoint. A match blocks.
+        ChEMBL target IDs for the challenge endpoint. A match blocks, and
+        covers every activity on the target: ``standard_types`` does not
+        apply.
     target_names : list[str]
         Target names or gene symbols (e.g. ``CYP3A4``) resolved against
         the release. A match is flagged, not blocking, because the

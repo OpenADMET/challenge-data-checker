@@ -1,6 +1,6 @@
 ---
 name: challenge-data-checker
-description: Check chemistry datasets for train/test leakage and data-quality problems with challenge-data-checker, and turn its report into a verdict. Use when asked to audit an ML benchmark/challenge split, check whether a data upload or public release leaks a blinded test set, or vet a single raw dataset (unparseable SMILES, duplicates, identifier conflicts, salts, stereo) before splitting or publishing it.
+description: Check chemistry datasets for train/test leakage and data-quality problems with challenge-data-checker, and turn its report into a verdict. Use when asked to audit an ML benchmark/challenge split, check whether a data upload or public release leaks a blinded test set, search a local ChEMBL release for whether a blinded test set's measurements are already public, or vet a single raw dataset (unparseable SMILES, duplicates, identifier conflicts, salts, stereo) before splitting or publishing it.
 ---
 
 # challenge-data-checker
@@ -86,14 +86,14 @@ so you must say what that endpoint is:
 
 ```bash
 challenge-data-checker public-search --test-files data/blinded_test.csv \
-    --chembl-sqlite /data/chembl_35.db --target-chembl-ids CHEMBL340 \
+    --chembl-sqlite /data/chembl_37.db --target-chembl-ids CHEMBL340 \
     --standard-types IC50 Ki --report-output reports/public.json
 ```
 
 ```python
 from challenge_data_checker import search_public
 
-report = search_public("data/blinded_test.csv", chembl_sqlite="/data/chembl_35.db",
+report = search_public("data/blinded_test.csv", chembl_sqlite="/data/chembl_37.db",
                        target_names=["CYP3A4"], standard_types=["IC50", "Ki"])
 ```
 
@@ -101,9 +101,27 @@ Name the endpoint with at least one of `--assay-chembl-ids`,
 `--target-chembl-ids` (both blocking on a match) or `--target-names`
 (resolved from a name or gene symbol, so only flagged; it resolves to
 single-protein targets unless `--target-types` widens it, since a symbol
-such as CYP3A4 is also part of family targets covering every P450). Add
-`--match-connectivity` to also match ignoring stereochemistry; it is off by
-default because it is the slowest lookup.
+such as CYP3A4 is also part of family targets covering every P450).
+Matching ignoring stereochemistry is on by default and flagged (WARN);
+`--no-match-connectivity` turns it off.
+
+**Find out where the endpoint lives in ChEMBL before configuring.** A
+single-protein endpoint (hERG is `CHEMBL240`) can be named by target ID.
+ADME and cell-based endpoints usually can't: ChEMBL files most of them
+under broad targets such as `CHEMBL612558` ("ADMET"), "Plasma", "Liver
+microsomes", a cell line, or "NON-PROTEIN TARGET", which hold every kind
+of measurement. A target ID matches **every** activity on that target,
+whatever its `standard_type`, so naming "ADMET" would flag any ADME record
+at all. For these, resolve the broad targets by name and restrict the
+measurement type, which gives flagged (WARN) findings to review:
+
+```bash
+challenge-data-checker public-search --test-files test.csv --chembl-sqlite chembl_37.db \
+    --target-names ADMET Plasma --target-types ADMET TISSUE --standard-types PPB Fu
+```
+
+Query the release first (count `standard_type` per target for assays whose
+description mentions the endpoint) to see which targets and types to name.
 
 ### Remote and private data
 
@@ -176,6 +194,7 @@ The sections:
 | `findings` (public-search) | Test structures whose public record measures the challenge endpoint, with the ChEMBL compounds and activities behind each |
 | `by_document` (public-search) | Findings grouped by ChEMBL document, with each one's share of the test set |
 | `presence` (public-search) | Test structures merely present in ChEMBL. **Not findings** |
+| `source` (public-search) | The ChEMBL release searched (name and date), to cite when reporting |
 | `resolved_targets` (public-search) | Each configured target name and the ChEMBL target IDs it resolved to. An empty list means nothing matched, so that name could only ever pass |
 | `inconsistent_smiles` | Structures written as more than one SMILES string, with the files using each form |
 | `unparseable_smiles` | Rows that didn't parse, with RDKit's message, a `category`, and `resolvable_via_identifier` |
@@ -198,6 +217,7 @@ is **what the leaked rows expose**:
   inventory lists. The score isn't exposed, but the release reveals which
   compounds are in the blinded test set, which can still bias
   participants. Report it as disclosure, not as a ground-truth leak.
+
 For a **public-search**, the same logic applies with ChEMBL standing in for
 the training pool:
 
@@ -225,10 +245,32 @@ the training pool:
 - **A text result.** A finding whose activity has no number but a
   `standard_text_value` such as "Not active" is a real answer, recorded
   categorically. Treat it as a leak, not as missing data.
+- **A test compound with no label for that endpoint.** A test set is
+  usually structures only, so the search can't know which compounds the
+  challenge actually measured for this endpoint. A finding on a compound
+  with no answer for it exposes nothing. Check the answer key (or the
+  per-endpoint test labels) and set these aside.
+- **A similar assay, not the same one.** Findings say a public record
+  measures the same *target*, not the same protocol: a radioligand binding
+  "Not active at 10 uM" against a functional patch-clamp % inhibition, in
+  vivo human clearance against microsomal CLint, Caco-2 against MDCK Papp,
+  rat against human plasma binding. Read `assay_description`,
+  `standard_units` and `organism` on each activity and say whether the
+  public value would give away the challenge answer, or only correlates
+  with it. A surrogate is worth reporting, but not as a leak.
+- **Records not counted as measured.** With no value, a text value or
+  comment of "Not determined", "Not tested", "Inconclusive" or "Could not
+  be calculated" is skipped. A number always counts, even beside one of
+  those comments: PubChem marks fitted qHTS potencies "Inconclusive".
 - **`resolved_targets` reaching more than expected.** If a gene symbol
   resolved to a protein complex or family, the `public_target_type_overlap`
   findings may be measurements of a different family member. Check before
   reporting them.
+
+- **A clean search covers ChEMBL only.** PubChem HTS depositions that
+  ChEMBL didn't import, TDC and other benchmark sets, vendor or
+  supplementary data are not searched. Say "no record in ChEMBL <release>",
+  not "not public".
 
 - **Probably benign.** Stereo-only overlap (`inchikey_connectivity`), where
   a racemate in one set and an enantiomer in the other can be a deliberate

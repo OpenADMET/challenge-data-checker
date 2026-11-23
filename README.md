@@ -4,9 +4,12 @@
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22780114.svg)](https://doi.org/10.5281/zenodo.22780114)
 
-A command-line tool that audits machine learning benchmarking datasets
-(train/test splits) for chemical data leakage, duplicates, and data quality
-issues. Built for sequential processing of datasets up to ~10,000 molecules.
+A command-line tool and Python API that audits machine learning benchmarking
+datasets (train/test splits) for chemical data leakage, duplicates, and data
+quality issues. It can also check a single dataset on its own, and search a
+local ChEMBL release for whether a blinded test set's measurements are
+already public. Built for sequential processing of datasets up to ~10,000
+molecules.
 
 ## Features
 
@@ -55,8 +58,8 @@ issues. Built for sequential processing of datasets up to ~10,000 molecules.
   `salt_form`, `stereo`, `tautomer` or `different_compound` (with the
   highest Tanimoto similarity between the structures), and only
   `different_compound` blocks. A compound with several identifiers is
-  found even when its salt form or stereo annotation differs between rows. Identifier values are compared with
-  surrounding whitespace stripped. Values that differ only in case or
+  found even when its salt form or stereo annotation differs between rows.
+  Identifier values are compared with surrounding whitespace stripped. Values that differ only in case or
   `-`/`_` are flagged as near-duplicates. Rows whose SMILES didn't parse are
   related back to the identifier as well: an identifier with a valid
   structure in some rows and a broken SMILES in others is flagged, and an
@@ -125,10 +128,15 @@ the `remote` extra pulls in `huggingface_hub`/`requests` (only needed if a
 ## Usage
 
 ```bash
-challenge-data-checker path/to/config.toml
+challenge-data-checker path/to/config.toml               # audit a train/test split
+challenge-data-checker check --config check.toml         # check one dataset
+challenge-data-checker public-search --config public.toml  # search ChEMBL for a test set
 ```
 
-Add `-v`/`--verbose` for debug-level logging (e.g. to see every identifier
+The audit is the default command; `check` and `public-search` are described
+under [Checking a single dataset](#checking-a-single-dataset) and
+[Searching public data sources](#searching-public-data-sources). Add
+`-v`/`--verbose` for debug-level logging (e.g. to see every identifier
 column warning).
 
 Exit codes, so CI can gate on the result:
@@ -136,7 +144,7 @@ Exit codes, so CI can gate on the result:
 | Code | Meaning |
 |---|---|
 | `0` | `PASS`, or `WARN` (flagged findings only) |
-| `1` | The audit couldn't run: configuration or input error |
+| `1` | The run couldn't start or finish: configuration, input or usage error |
 | `2` | `FAIL` (blocking findings), or `WARN` when run with `--strict` |
 
 Pass `--strict` to also fail on flagged (`WARN`) findings.
@@ -344,14 +352,14 @@ challenge-data-checker public-search --config public.toml
 
 # or entirely with flags
 challenge-data-checker public-search --test-files data/blinded_test.csv \
-    --chembl-sqlite /data/chembl_35.db --target-chembl-ids CHEMBL340 \
+    --chembl-sqlite /data/chembl_37.db --target-chembl-ids CHEMBL340 \
     --standard-types IC50 Ki --report-output reports/public.json
 ```
 
 ```python
 from challenge_data_checker import search_public
 
-report = search_public("data/blinded_test.csv", chembl_sqlite="/data/chembl_35.db",
+report = search_public("data/blinded_test.csv", chembl_sqlite="/data/chembl_37.db",
                        target_chembl_ids=["CHEMBL340"], standard_types=["IC50", "Ki"])
 ```
 
@@ -368,7 +376,7 @@ identifier_columns = ["compound_id"]
 strip_salts = true          # also match a compound by its salt-stripped parent
 
 [public_search]
-chembl_sqlite = "/data/chembl_35/chembl_35_sqlite/chembl_35.db"
+chembl_sqlite = "/data/chembl_37/chembl_37_sqlite/chembl_37.db"
 target_chembl_ids = ["CHEMBL340"]        # CYP3A4; a match is blocking
 assay_chembl_ids = []                    # specific assays; a match is blocking
 target_names = ["CYP3A4"]                # resolved by name/gene symbol; flagged
@@ -376,6 +384,11 @@ standard_types = ["IC50", "Ki", "Inhibition"]
 target_types = ["SINGLE PROTEIN"]        # what target_names may resolve to (default)
 match_connectivity = true                # also match ignoring stereochemistry (default)
 ```
+
+ChEMBL releases are downloaded from the
+[EBI FTP site](https://ftp.ebi.ac.uk/pub/databases/chembl/ChEMBLdb/latest/)
+as `chembl_<N>_sqlite.tar.gz` (about 6 GB, 30 GB unpacked). ChEMBL 26 or
+newer is needed.
 
 How a match is tiered depends on both how the structure matched and how
 strong the endpoint evidence is:
@@ -409,7 +422,8 @@ inflates exactly the share a reviewer acts on.
 Only a named assay or target on an exact or salt-form structure match
 blocks. Resolving a target from a name is a guess, and a connectivity-only
 match may be a deliberate stereo split, so both are flagged for a human
-instead. This is the audit's rule 3 applied to a public source. Use
+instead. This is the audit's [rule 3](#severity-tiers) applied to a public
+source. Use
 `--strict` to make flagged findings fail too.
 
 The report has `"mode": "public_search"`. Alongside the findings it carries
@@ -417,7 +431,11 @@ The report has `"mode": "public_search"`. Alongside the findings it carries
 paper covering a large share of the test set is the strongest unblinding
 signal there is.
 
-`target_names` resolves to single-protein targets only unless `target_types` widens it. In ChEMBL 37 the gene symbol `CYP3A4` resolves to the single protein CHEMBL340 and also to three protein families, the broadest being every cytochrome P450 (CHEMBL4523986). Matching those would flag a CYP2D6 measurement recorded against the family as a CYP3A4 leak.
+`target_names` resolves to single-protein targets only unless
+`target_types` widens it. In ChEMBL 37 the gene symbol `CYP3A4` resolves to
+the single protein CHEMBL340 and also to three protein families, the
+broadest being every cytochrome P450 (CHEMBL4523986). Matching those would
+flag a CYP2D6 measurement recorded against the family as a CYP3A4 leak.
 
 Whatever each name resolved to is recorded in the report as
 `resolved_targets`, and shown in the summary, so a complex or family that
@@ -433,6 +451,37 @@ exact match, stereochemistry included, blocks (FAIL). The lookup is a range
 scan of ChEMBL's index on `standard_inchi_key`, not a table scan, so it
 costs little. Turn it off with `match_connectivity = false` or
 `--no-match-connectivity`.
+
+#### Choosing how to name the endpoint
+
+Look up where the endpoint's data lives in the release before configuring.
+`standard_types` only filters `target_names` matches: a configured
+`target_chembl_ids` entry matches **every** activity on that target,
+whatever its type. That suits a single-protein target such as hERG
+(`CHEMBL240`). Most ADME and cell-based endpoints are filed under broad
+targets instead, such as `CHEMBL612558` ("ADMET"), "Plasma", "Liver
+microsomes", a cell line or "NON-PROTEIN TARGET", which hold every kind of
+measurement, so naming one by ID would flag any record on it. Resolve those
+by name and restrict the type instead, which gives flagged (WARN) findings:
+
+```toml
+[public_search]
+target_names = ["ADMET", "Plasma"]       # target_dictionary.pref_name matches too
+target_types = ["ADMET", "TISSUE"]
+standard_types = ["PPB", "Fu"]
+```
+
+Even then, a finding says that a public record measures the same target,
+not the same protocol: a broad type such as `CL` also covers in-vivo
+clearance, `Papp` covers Caco-2 as well as MDCK, and the species is not
+filtered. Read each activity's `assay_description`, `standard_units` and
+`organism` before calling it a leak. A test set is usually structures only,
+so a finding can also land on a compound the challenge never measured for
+that endpoint, which exposes nothing.
+
+A clean search covers one ChEMBL release only. PubChem depositions ChEMBL
+didn't import, benchmark collections such as TDC, and supplementary data
+are not searched.
 
 ### Using it from an AI agent
 

@@ -63,7 +63,7 @@ If AI tools contributed materially to a PR, that's fine and you don't need to fl
   > python -c "import os, shutil, rdkit; sp = os.path.dirname(os.path.dirname(rdkit.__file__)); shutil.rmtree(os.path.join(sp, 'rdkit-stubs'), ignore_errors=True)"
   > ```
 
-- **Docs:** update `README.md` when behaviour, configuration options, or the Python API change.
+- **Docs:** update `README.md` when behaviour, configuration options, or the Python API change, `skills/challenge-data-checker/SKILL.md` when it changes how a report should be read, and the `[Unreleased]` section of `CHANGELOG.md`.
 
 ## Opening a pull request
 

@@ -266,7 +266,9 @@ def search_public(
         ChEMBL assay IDs that measure the challenge endpoint. A match is
         blocking.
     target_chembl_ids : Sequence[str] | None
-        ChEMBL target IDs for the challenge endpoint. A match is blocking.
+        ChEMBL target IDs for the challenge endpoint. A match is blocking,
+        and covers every activity on the target: ``standard_types`` does
+        not apply.
     target_names : Sequence[str] | None
         Target names or gene symbols (e.g. ``CYP3A4``) resolved against
         the release. A match is flagged, not blocking.
