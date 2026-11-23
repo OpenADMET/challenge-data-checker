@@ -1,20 +1,28 @@
 """Shared execution pipeline: load pools, process molecules, build/save/print a report.
 
-Used by both the CLI (``cli.run`` / ``cli.run_check``) and the direct Python
-API (``api.audit`` / ``api.check``), which differ only in how they build the
-configuration passed in.
+Used by both the CLI (``cli.run`` / ``cli.run_check`` /
+``cli.run_public_search``) and the direct Python API (``api.audit`` /
+``api.check`` / ``api.search_public``), which differ only in how they build
+the configuration passed in.
 """
 
 from challenge_data_checker.chemistry import MoleculeProcessor, process_pool
-from challenge_data_checker.config import CheckConfig, Config
+from challenge_data_checker.config import CheckConfig, Config, PublicSearchConfig
 from challenge_data_checker.io_utils import load_pool
 from challenge_data_checker.report import (
     build_check_report,
+    build_public_search_report,
     build_report,
+    print_public_search_summary,
     print_summary,
     save_report,
 )
-from challenge_data_checker.report_types import CheckReport, PerPool, Report
+from challenge_data_checker.report_types import (
+    CheckReport,
+    PerPool,
+    PublicSearchReport,
+    Report,
+)
 
 
 def run_audit(config: Config, *, save: bool = True, print_report: bool = True) -> Report:
@@ -104,4 +112,43 @@ def run_check(config: CheckConfig, *, save: bool = True, print_report: bool = Tr
         save_report(report, config.paths.report_output, config.settings.report_format)
     if print_report:
         print_summary(report, config.paths.report_output)
+    return report
+
+
+def run_public_search(
+    config: PublicSearchConfig, *, save: bool = True, print_report: bool = True
+) -> PublicSearchReport:
+    """Run the public-source search pipeline for an already-built configuration.
+
+    Loads only the test set: the comparison is against a public database,
+    so there is no training pool to load.
+
+    Parameters
+    ----------
+    config : PublicSearchConfig
+        The public-search configuration to run with, however it was built
+        (from a TOML file, CLI flags, or ``api.search_public``).
+    save : bool
+        Whether to write the report to ``config.paths.report_output``.
+        Has no effect if ``report_output`` is ``None``.
+    print_report : bool
+        Whether to print the stdout summary dashboard.
+
+    Returns
+    -------
+    PublicSearchReport
+        The JSON-serialisable report, as returned by
+        ``report.build_public_search_report``.
+    """
+    test_df, identifier_columns, smiles_columns = load_pool(
+        config.paths.test_files, config.columns.smiles_column, config.columns.identifier_columns
+    )
+    processor = MoleculeProcessor(config.settings)
+    records = process_pool(test_df, "test", identifier_columns, processor)
+    report = build_public_search_report(config, records, identifier_columns, smiles_columns)
+
+    if save and config.paths.report_output is not None:
+        save_report(report, config.paths.report_output, config.settings.report_format)
+    if print_report:
+        print_public_search_summary(report, config.paths.report_output)
     return report

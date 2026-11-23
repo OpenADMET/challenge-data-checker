@@ -6,12 +6,14 @@ description: Check chemistry datasets for train/test leakage and data-quality pr
 # challenge-data-checker
 
 `challenge-data-checker` compares chemical structures (SMILES) and compound
-identifiers between datasets. It has two modes:
+identifiers between datasets. It has three modes:
 
 - **audit**: a train/test split. Finds leakage between the pools plus
   problems within each.
 - **check**: one dataset on its own. Finds the problems that don't need a
   split.
+- **public-search**: a test set against a local ChEMBL release. Finds out
+  whether a blinded test set's measurements are already public.
 
 Your job is usually not just to run it. It's to decide what the findings
 *mean*, for example "does this public release leak the blinded test set?",
@@ -70,6 +72,38 @@ challenge-data-checker check --files raw_a.csv raw_b.tsv --identifier-columns co
 from challenge_data_checker import check
 report = check(["raw_a.csv", "raw_b.tsv"], identifier_columns=["compound_id"])
 ```
+
+### Search public sources for a blinded test set
+
+A blind challenge's test set can already be public: the measurements may
+have been published and curated into ChEMBL. This needs a **local** ChEMBL
+SQLite release, which keeps the blinded structures off the network and lets
+the report cite the release it searched.
+
+Presence in ChEMBL is **not** leakage, since most drug-like compounds appear
+somewhere. A finding needs a public record measuring the challenge endpoint,
+so you must say what that endpoint is:
+
+```bash
+challenge-data-checker public-search --test-files data/blinded_test.csv \
+    --chembl-sqlite /data/chembl_35.db --target-chembl-ids CHEMBL340 \
+    --standard-types IC50 Ki --report-output reports/public.json
+```
+
+```python
+from challenge_data_checker import search_public
+
+report = search_public("data/blinded_test.csv", chembl_sqlite="/data/chembl_35.db",
+                       target_names=["CYP3A4"], standard_types=["IC50", "Ki"])
+```
+
+Name the endpoint with at least one of `--assay-chembl-ids`,
+`--target-chembl-ids` (both blocking on a match) or `--target-names`
+(resolved from a name or gene symbol, so only flagged; it resolves to
+single-protein targets unless `--target-types` widens it, since a symbol
+such as CYP3A4 is also part of family targets covering every P450). Add
+`--match-connectivity` to also match ignoring stereochemistry; it is off by
+default because it is the slowest lookup.
 
 ### Remote and private data
 
@@ -139,6 +173,10 @@ The sections:
 | `internal_duplicates.<pool>` | Repeats within one pool, per representation and identifier column |
 | `identifier_namespace_issues.<col>` | An ID with several structures (each with a `conflict_type`), a compound with several IDs, near-duplicate or whitespace-padded IDs, IDs whose SMILES is broken or empty in some rows |
 | `quality_flags.<pool>` | Salts/solvates, metals, multi-component entries, homodimers, net charge, undefined stereo, suspicious fragments, RDKit warnings |
+| `findings` (public-search) | Test structures whose public record measures the challenge endpoint, with the ChEMBL compounds and activities behind each |
+| `by_document` (public-search) | Findings grouped by ChEMBL document, with each one's share of the test set |
+| `presence` (public-search) | Test structures merely present in ChEMBL. **Not findings** |
+| `resolved_targets` (public-search) | Each configured target name and the ChEMBL target IDs it resolved to. An empty list means nothing matched, so that name could only ever pass |
 | `inconsistent_smiles` | Structures written as more than one SMILES string, with the files using each form |
 | `unparseable_smiles` | Rows that didn't parse, with RDKit's message, a `category`, and `resolvable_via_identifier` |
 
@@ -160,6 +198,38 @@ is **what the leaked rows expose**:
   inventory lists. The score isn't exposed, but the release reveals which
   compounds are in the blinded test set, which can still bias
   participants. Report it as disclosure, not as a ground-truth leak.
+For a **public-search**, the same logic applies with ChEMBL standing in for
+the training pool:
+
+- **`public_assay_overlap` (FAIL).** A configured assay or target measures
+  this exact compound (or a salt form of it). The challenge answer is
+  published. Report the compound, the ChEMBL ID, the activity value and the
+  document.
+- **`public_target_type_overlap` (WARN).** The target was resolved from a
+  name rather than named outright, so confirm the ChEMBL target really is
+  the challenge endpoint before calling it a leak.
+- **`public_assay_stereo_overlap` (WARN).** Only the connectivity block
+  matched, so the public record may be a different stereoisomer. Check
+  whether the challenge scores stereochemistry.
+- **`presence` with no findings.** The compounds are known to ChEMBL but
+  nothing measures the endpoint. This is normal and is not a leak; say so
+  rather than listing it as an issue.
+- **`by_document` concentration.** If one document covers a large share of
+  the test set, lead with that: it means a single paper holds the answers.
+  Activities ChEMBL flags `potential_duplicate` are left out of these
+  counts, so a paper is credited only with what it measured, not with what
+  it cited.
+- **An activity with `data_validity_comment` set.** ChEMBL doubts the
+  number, not the fact that it was published. Still a leak - the compound
+  is unblinded either way - but say the value may be wrong.
+- **A text result.** A finding whose activity has no number but a
+  `standard_text_value` such as "Not active" is a real answer, recorded
+  categorically. Treat it as a leak, not as missing data.
+- **`resolved_targets` reaching more than expected.** If a gene symbol
+  resolved to a protein complex or family, the `public_target_type_overlap`
+  findings may be measurements of a different family member. Check before
+  reporting them.
+
 - **Probably benign.** Stereo-only overlap (`inchikey_connectivity`), where
   a racemate in one set and an enantiomer in the other can be a deliberate
   split. Tanimoto pairs at the default threshold of `1.0` are fingerprint
