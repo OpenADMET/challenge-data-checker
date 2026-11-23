@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "challenge-data-checker"
-version = "0.4.0"
-description = "Audit ML benchmarking train/test splits for chemical data leakage and data quality issues."
+version = "0.5.0"
+description = "Audit ML benchmarking train/test splits for chemical data leakage and data quality issues, and search ChEMBL for already-public test sets."
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
