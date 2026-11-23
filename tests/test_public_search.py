@@ -443,10 +443,11 @@ def test_an_activity_marked_not_determined_is_not_a_leak(chembl):
     assert report["summary"]["total_found_in_source"] == 1
 
 
-def test_only_the_comment_decides_whether_a_record_was_measured(chembl):
-    # The narrow rule, stated as a unit: the comment is the only thing that
-    # rejects a record, matched case- and whitespace-insensitively, and a
-    # record with no comment counts however little else it carries.
+def test_a_not_measured_comment_rejects_only_an_empty_record(chembl):
+    # The narrow rule, stated as a unit: on a record with no value and no
+    # text value, the comment decides, matched case- and
+    # whitespace-insensitively, and a record with no comment counts however
+    # little else it carries.
     blank: ChemblActivity = {
         "assay_chembl_id": None,
         "assay_description": None,
@@ -470,6 +471,66 @@ def test_only_the_comment_decides_whether_a_record_was_measured(chembl):
     # reported inactive against the challenge endpoint is still an answer.
     for comment in ("Not Active", "Inactive", "Active", "Potency determined"):
         assert _is_measured({**blank, "activity_comment": comment}), comment
+
+
+def test_a_value_counts_even_with_a_not_measured_comment(chembl):
+    # Regression: PubChem qHTS depositions carry the curve class
+    # "Inconclusive" in activity_comment beside a fitted potency, e.g. a hERG
+    # Potency of 6.3 uM (CHEMBL1794573). Found in a live run on ChEMBL 37,
+    # where 2,895,822 activities have that comment and a value: rejecting
+    # them on the comment hid the measurement.
+    record: ChemblActivity = {
+        "assay_chembl_id": "CHEMBL1794573",
+        "assay_description": None,
+        "target_chembl_id": "CHEMBL240",
+        "target_name": None,
+        "organism": None,
+        "standard_type": "Potency",
+        "standard_relation": "=",
+        "standard_value": 6309.6,
+        "standard_units": "nM",
+        "pchembl_value": None,
+        "standard_text_value": None,
+        "activity_comment": "inconclusive",
+        "document_chembl_id": None,
+        "document_reference": None,
+    }
+    assert _is_measured(record)
+    for comment in ("Not Determined", "Not tested"):
+        assert _is_measured({**record, "activity_comment": comment}), comment
+    # A text result beside a not-measured comment is a result too.
+    text_only = {**record, "standard_value": None, "standard_text_value": "Active"}
+    assert _is_measured(text_only)
+
+
+def test_a_not_measured_text_value_is_not_a_result(chembl):
+    # Regression: ChEMBL 37 also holds the non-result in standard_text_value
+    # ("Not determined" 6,933 times), which was counted as a text result.
+    record: ChemblActivity = {
+        "assay_chembl_id": None,
+        "assay_description": None,
+        "target_chembl_id": None,
+        "target_name": None,
+        "organism": None,
+        "standard_type": "IC50",
+        "standard_relation": None,
+        "standard_value": None,
+        "standard_units": None,
+        "pchembl_value": None,
+        "standard_text_value": None,
+        "activity_comment": None,
+        "document_chembl_id": None,
+        "document_reference": None,
+    }
+    for text in ("Not determined", " NOT TESTED ", "Inconclusive", "Could not be calculated"):
+        assert not _is_measured({**record, "standard_text_value": text}), text
+    # The text value decides over the comment when both are present.
+    assert not _is_measured(
+        {**record, "standard_text_value": "Not determined", "activity_comment": "Active"}
+    )
+    assert _is_measured(
+        {**record, "standard_text_value": "Not active", "activity_comment": "Not determined"}
+    )
 
 
 def test_a_text_only_result_is_a_leak(chembl):

@@ -176,10 +176,12 @@ def lookup_keys(
     return {representation: sorted(values) for representation, values in index.items() if values}
 
 
-# ``activity_comment`` values that say the endpoint was never measured, so
-# the record cannot expose a challenge answer. Deliberately short: anything
-# not on it is treated as a result, because under-reporting a leak is the
-# worse error. Compared lower-cased and stripped.
+# Values that say the endpoint was never measured, so the record cannot
+# expose a challenge answer. Checked in ``activity_comment``, and in
+# ``standard_text_value`` too, where ChEMBL 37 holds "Not determined" 6,933
+# times and "Could not be calculated" 1,143 times. Deliberately short:
+# anything not on it is treated as a result, because under-reporting a leak
+# is the worse error. Compared lower-cased and stripped.
 #
 # "Not determined" is ChEMBL's own example of the non-numeric activities
 # this column used to carry (ChEMBL schema documentation, ``activities``:
@@ -187,24 +189,35 @@ def lookup_keys(
 # 'Not determined'"), and "Not tested" is the same statement. "Inconclusive"
 # comes from the PubChem Activity Summary vocabulary that ChEMBL copies into
 # this column for PubChem depositions: the assay ran but reached no
-# conclusion, so there is still no answer to read off.
+# conclusion, so there is still no answer to read off. "Could not be
+# calculated" says the same of a derived value.
 #
 # Note what is *not* here: "Not active", "Inactive" and the rest of that
 # vocabulary are results. A compound reported inactive against the
 # challenge's endpoint is an answer, and a leaked one.
-_NOT_MEASURED_COMMENTS: frozenset[str] = frozenset({"not determined", "not tested", "inconclusive"})
+_NOT_MEASURED_COMMENTS: frozenset[str] = frozenset(
+    {"not determined", "not tested", "inconclusive", "could not be calculated"}
+)
 
 
 def _is_measured(activity: ChemblActivity) -> bool:
     """Whether an activity record is a measurement at all.
 
-    Only records ChEMBL explicitly marks as not measured are rejected,
-    through ``activity_comment``. Everything else counts, text results
-    included: a categorical outcome in ``standard_text_value`` ("Not
-    active") answers the challenge's question just as a number does, and
-    ChEMBL's schema documentation notes a record carries a value or a text
-    value, never both. Requiring a numeric value therefore dropped every
-    qualitative endpoint, which is a whole class of missed leakage.
+    A numeric ``standard_value`` always counts, whatever the comment says.
+    PubChem depositions carry the curve class "Inconclusive" in
+    ``activity_comment`` beside a fitted potency: 2,895,822 ChEMBL 37
+    activities have that comment and a value, and the value is an answer.
+
+    Otherwise a text result counts unless it is itself one of
+    ``_NOT_MEASURED_COMMENTS``: a categorical outcome in
+    ``standard_text_value`` ("Not active") answers the challenge's question
+    just as a number does, and ChEMBL's schema documentation notes a record
+    carries a value or a text value, never both. Requiring a numeric value
+    therefore dropped every qualitative endpoint, which is a whole class of
+    missed leakage.
+
+    A record with neither is rejected only if ``activity_comment`` says it
+    was not measured.
 
     Parameters
     ----------
@@ -214,9 +227,15 @@ def _is_measured(activity: ChemblActivity) -> bool:
     Returns
     -------
     bool
-        ``False`` only if ``activity_comment`` is one of
-        ``_NOT_MEASURED_COMMENTS``, otherwise ``True``.
+        ``False`` if the record has no ``standard_value`` and either its
+        ``standard_text_value`` or, lacking one, its ``activity_comment``
+        is one of ``_NOT_MEASURED_COMMENTS``; otherwise ``True``.
     """
+    if activity["standard_value"] is not None:
+        return True
+    text = activity["standard_text_value"]
+    if text is not None:
+        return text.strip().lower() not in _NOT_MEASURED_COMMENTS
     comment = (activity["activity_comment"] or "").strip().lower()
     return comment not in _NOT_MEASURED_COMMENTS
 

@@ -386,13 +386,16 @@ strong the endpoint evidence is:
 | InChIKey connectivity block | a configured assay or target ID | `public_assay_stereo_overlap` | WARN |
 | any | target resolved from a name, plus an allowed `standard_type` | `public_target_type_overlap` | WARN |
 
-An activity ChEMBL marks as never measured is not a finding either: an
-`activity_comment` of "Not Determined", "Not tested" or "Inconclusive"
+An activity ChEMBL marks as never measured is not a finding either: with
+no numeric value, a `standard_text_value` or `activity_comment` of "Not
+Determined", "Not tested", "Inconclusive" or "Could not be calculated"
 means the endpoint was looked at, not measured, so no answer is exposed.
-That is the only thing skipped. A text result counts: ChEMBL holds
-categorical outcomes such as "Not active" in `standard_text_value` with no
-number beside them, and a compound reported inactive against the
-challenge's endpoint is an answer and a leak like any other.
+That is the only thing skipped. A number always counts, even beside one of
+those comments: PubChem depositions mark a fitted potency "Inconclusive".
+A text result counts too: ChEMBL holds categorical outcomes such as "Not
+active" in `standard_text_value` with no number beside them, and a
+compound reported inactive against the challenge's endpoint is an answer
+and a leak like any other.
 
 ChEMBL's two curation flags on an activity are reported, not acted on. A
 `data_validity_comment` such as "Potential transcription error" means the

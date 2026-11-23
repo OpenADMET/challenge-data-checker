@@ -33,12 +33,14 @@ All notable changes to this project are recorded here. The format follows
   - Available as `challenge-data-checker public-search`, with a
     `[public_search]` config section or equivalent flags, and as
     `search_public()` in the Python API.
-  - An activity ChEMBL marks as never measured is not a finding: an
-    `activity_comment` of "Not Determined", "Not tested" or "Inconclusive"
+  - An activity ChEMBL marks as never measured is not a finding: with no
+    numeric value, a `standard_text_value` or `activity_comment` of "Not
+    Determined", "Not tested", "Inconclusive" or "Could not be calculated"
     means the endpoint was looked at, not measured, so no answer is
-    exposed. That is the only thing skipped - a text result in
-    `standard_text_value`, such as "Not active", is an answer and so a
-    finding.
+    exposed. That is the only thing skipped - a number always counts, even
+    beside one of those comments (PubChem marks fitted potencies
+    "Inconclusive"), and a text result in `standard_text_value`, such as
+    "Not active", is an answer and so a finding.
   - ChEMBL's curation flags on an activity are reported, not acted on. A
     `data_validity_comment` ("Potential transcription error") leaves the
     finding standing, with the flag shown: a wrong number in a public paper
